@@ -3,6 +3,7 @@
 | Version | Summary |
 |---------|---------|
 | Unreleased | |
+| 0.1.4 | AC-004: plan.md template cleanup — CODE plan template now has six sections (Product Direction, Current Platform, Objective-Fit Rubric, Priorities, Deferred, Constraints); removed process guidance and Notes that duplicated `docs/development-cycle.md`; repokit's own `plan.md` cleaned of completed items, given real Deferred and Constraints entries; examples regenerated |
 | 0.1.3 | Renamed module from `repo-governance-template` to `repokit` across go.mod, all Go imports, README, arch, plan, overlay templates, and rendered examples; AC-003 test coverage push: bootstrap 75%, buildtool 36%, reltool 39%, domain coverage 63%; AC-003 acceptance targets adjusted to reflect subprocess-dependent coverage ceiling |
 | 0.1.2 | Operator guidance (R2): Quick Start section in README with CODE, DOC, and enhance examples; refreshed milestone text to reflect shipped state; corrected enhance wording across all operator docs; fixed enhance flow step ordering in bootstrap-model; reduced `scripts/README.md` to pointer; migrated overlay wishlists to `plan.md` |
 | 0.1.1 | Enhance mode now produces AC docs instead of standing `docs/enhance-report.md` report; deterministic candidate ranking (`accept`+`portable` > `adapt`+`needs-review`); no file created when no actionable improvements found; dry-run support; `RunEnhance` exported for testability; bootstrap coverage improved from 44% to 57% |

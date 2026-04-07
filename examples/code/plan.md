@@ -1,6 +1,6 @@
 # example-code-repo Plan
 
-## Project Direction
+## Product Direction
 
 Example governed code repository rendered from the template.
 
@@ -19,9 +19,13 @@ Every new roadmap item should answer:
 
 ## Priorities
 
-- add the highest-priority approved work items here
-- keep this file prioritized rather than turning it into an unstructured backlog
+- active work items only; remove when shipped
 
-## Notes
+## Deferred
 
-- use `docs/` for acceptance-criteria drafts, critiques, and related implementation contracts
+| ID | Description | Reason |
+|----|-------------|--------|
+
+## Constraints
+
+- project-specific anti-patterns and guardrails here
