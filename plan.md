@@ -20,8 +20,7 @@ Every new roadmap item should answer:
 
 ## Priorities
 
-- DOC overlay: richer platform-specific publishing examples
-- DOC overlay: optional alternate voice.md or calendar.md variants
+- (all current priorities shipped)
 
 ## Deferred
 

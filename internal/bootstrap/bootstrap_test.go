@@ -2758,6 +2758,105 @@ func TestBootstrapAdoptProposesEnrichedDocs(t *testing.T) {
 	}
 }
 
+// --- AC-012: DOC overlay enrichment ---
+
+func TestBootstrapNewDocProducesEnrichedFiles(t *testing.T) {
+	t.Parallel()
+
+	templateRoot, _ := filepath.Abs("../..")
+	targetDir := t.TempDir()
+
+	cfg := Config{
+		Mode:               ModeNew,
+		Type:               RepoTypeDoc,
+		Target:             targetDir,
+		RepoName:           "test-doc",
+		Purpose:            "test purpose",
+		PublishingPlatform: "Hugo",
+		Style:              "concise",
+	}
+	if err := runNewOrAdopt(templateRoot, cfg, false); err != nil {
+		t.Fatalf("runNewOrAdopt() error = %v", err)
+	}
+
+	// publishing-workflow.md should contain platform notes
+	pw, _ := os.ReadFile(filepath.Join(targetDir, "publishing-workflow.md"))
+	if !strings.Contains(string(pw), "Platform-Specific Notes") {
+		t.Fatal("publishing-workflow.md should contain Platform-Specific Notes")
+	}
+
+	// variant files should exist
+	for _, rel := range []string{"voice.md", "calendar.md"} {
+		if _, err := os.Stat(filepath.Join(targetDir, rel)); err != nil {
+			t.Fatalf("expected %s to exist, got error: %v", rel, err)
+		}
+	}
+
+	// agent-roles should exist
+	for _, rel := range []string{
+		filepath.Join("docs", "agent-roles", "dev.md"),
+		filepath.Join("docs", "agent-roles", "qa.md"),
+		filepath.Join("docs", "agent-roles", "maintainer.md"),
+	} {
+		if _, err := os.Stat(filepath.Join(targetDir, rel)); err != nil {
+			t.Fatalf("expected %s to exist, got error: %v", rel, err)
+		}
+	}
+
+	// DOC dev role should use editorial language, not build language
+	devRole, _ := os.ReadFile(filepath.Join(targetDir, "docs", "agent-roles", "dev.md"))
+	if strings.Contains(string(devRole), "build command") {
+		t.Fatal("DOC dev.md should not reference build commands")
+	}
+	if !strings.Contains(string(devRole), "publishing workflow") {
+		t.Fatal("DOC dev.md should reference publishing workflow")
+	}
+}
+
+func TestBootstrapAdoptDocProposesEnrichedFiles(t *testing.T) {
+	t.Parallel()
+
+	templateRoot, _ := filepath.Abs("../..")
+	targetDir := t.TempDir()
+
+	mustWrite(t, filepath.Join(targetDir, "voice.md"), "# Old voice\n")
+	mustWrite(t, filepath.Join(targetDir, "calendar.md"), "# Old calendar\n")
+	mustWrite(t, filepath.Join(targetDir, "publishing-workflow.md"), "# Old workflow\n")
+	mustWrite(t, filepath.Join(targetDir, "docs", "agent-roles", "dev.md"), "# Old dev\n")
+	mustWrite(t, filepath.Join(targetDir, "AGENTS.md"), "# AGENTS.md\n\n## Purpose\n\nP.\n\n## Governed Sections\n\nG.\n\n## Interaction Mode\n\nI.\n\n## Approval Boundaries\n\nA.\n\n## Review Style\n\nR.\n\n## File-Change Discipline\n\nF.\n\n## Release Or Publish Triggers\n\nT.\n\n## Documentation Update Expectations\n\nD.\n")
+
+	cfg := Config{
+		Mode:               ModeAdopt,
+		Type:               RepoTypeDoc,
+		Target:             targetDir,
+		RepoName:           "test-doc",
+		Purpose:            "test purpose",
+		PublishingPlatform: "Hugo",
+		Style:              "concise",
+	}
+	if err := runNewOrAdopt(templateRoot, cfg, true); err != nil {
+		t.Fatalf("runNewOrAdopt() error = %v", err)
+	}
+
+	for _, rel := range []string{
+		"voice.md",
+		"calendar.md",
+		"publishing-workflow.md",
+		filepath.Join("docs", "agent-roles", "dev.md"),
+	} {
+		proposal := proposalPath(filepath.Join(targetDir, rel))
+		if _, err := os.Stat(proposal); err != nil {
+			t.Fatalf("expected proposal for %s, got error: %v", rel, err)
+		}
+	}
+
+	// Proposed publishing-workflow should contain platform notes
+	pwProposal, _ := os.ReadFile(proposalPath(filepath.Join(targetDir, "publishing-workflow.md")))
+	if !strings.Contains(string(pwProposal), "Platform-Specific Notes") {
+		t.Fatal("proposed publishing-workflow.md should contain Platform-Specific Notes")
+	}
+}
+
 func mustWrite(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
