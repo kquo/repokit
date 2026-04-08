@@ -3,6 +3,7 @@
 | Version | Summary |
 |---------|---------|
 | Unreleased | |
+| 0.2.3 | AC-011: CODE overlay enrichment — template upgrade guidance, release artifacts section, worked AC example |
 | 0.2.2 | AC-010: go fmt failures now build-breaking; release tool recovery guidance; doc drift fixes; reltool coverage 57.8% |
 | 0.2.1 | AC-009: maintainer role for single-agent repos combining DEV and QA with self-review requirement |
 | 0.2.0 | AC-008: agent role bootstrap pattern with `docs/agent-roles/` for DEV and QA roles; bootstrap `--help` exits cleanly; consistent CLI usage formatting across all commands; `-?` alias for bootstrap |

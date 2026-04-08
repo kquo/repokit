@@ -15,6 +15,7 @@ Current contents:
 - `docs/README.md`
 - `docs/development-cycle.md`
 - `docs/ac-template.md`
+- `docs/ac-example.md`
 - `docs/build-release.md`
 - `docs/development-guidelines.md`
 - `docs/knowledge/README.md`

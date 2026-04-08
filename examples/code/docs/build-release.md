@@ -74,3 +74,18 @@ If the repo includes `build.sh`, the same release can be triggered through the s
 ```bash
 ./build.sh vX.Y.Z "release message"
 ```
+
+## Release Artifacts
+
+- `TEMPLATE_VERSION` is the template contract version written at bootstrap time. It records which template version this repo was generated from.
+- `CHANGELOG.md`, if the repo maintains one, is the human-readable release history. Keep it current as the canonical record of what shipped in each version.
+
+## Template Upgrade
+
+This repo was generated from a governance template. To check for template updates:
+
+1. Compare `TEMPLATE_VERSION` in this repo against the source template's current version.
+2. Diff changed files manually against the template's current overlays.
+3. `.repokit-manifest`, if present, records SHA-256 checksums of each file at bootstrap time. This enables tooling-assisted comparison to distinguish your customizations from stale template content.
+
+Template refresh is an operator-driven review process. The template maintainer may use enhance mode from the template repo to identify improvements, but generated repos do not run enhance directly.

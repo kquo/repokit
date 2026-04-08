@@ -20,8 +20,6 @@ Every new roadmap item should answer:
 
 ## Priorities
 
-- CODE overlay: deeper release and upgrade guidance
-- CODE overlay: richer example acceptance-criteria docs
 - DOC overlay: richer platform-specific publishing examples
 - DOC overlay: optional alternate voice.md or calendar.md variants
 

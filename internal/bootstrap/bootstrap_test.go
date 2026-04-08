@@ -2665,6 +2665,99 @@ func TestBootstrapAdoptProposesAgentRoles(t *testing.T) {
 	}
 }
 
+// --- AC-011: CODE overlay enrichment ---
+
+func TestBootstrapNewProducesEnrichedDocs(t *testing.T) {
+	t.Parallel()
+
+	templateRoot, _ := filepath.Abs("../..")
+	targetDir := t.TempDir()
+
+	cfg := Config{
+		Mode:     ModeNew,
+		Type:     RepoTypeCode,
+		Target:   targetDir,
+		RepoName: "test-repo",
+		Purpose:  "test purpose",
+		Stack:    "Go CLI",
+	}
+	if err := runNewOrAdopt(templateRoot, cfg, false); err != nil {
+		t.Fatalf("runNewOrAdopt() error = %v", err)
+	}
+
+	// ac-example.md should exist
+	examplePath := filepath.Join(targetDir, "docs", "ac-example.md")
+	if _, err := os.Stat(examplePath); err != nil {
+		t.Fatalf("expected docs/ac-example.md, got error: %v", err)
+	}
+	exampleContent, _ := os.ReadFile(examplePath)
+	if !strings.Contains(string(exampleContent), "EXAMPLE") {
+		t.Fatal("ac-example.md should be clearly marked as an example")
+	}
+
+	// build-release.md should contain new sections
+	brPath := filepath.Join(targetDir, "docs", "build-release.md")
+	brContent, err := os.ReadFile(brPath)
+	if err != nil {
+		t.Fatalf("expected docs/build-release.md, got error: %v", err)
+	}
+	if !strings.Contains(string(brContent), "## Template Upgrade") {
+		t.Fatal("build-release.md should contain Template Upgrade section")
+	}
+	if !strings.Contains(string(brContent), "## Release Artifacts") {
+		t.Fatal("build-release.md should contain Release Artifacts section")
+	}
+}
+
+func TestBootstrapAdoptProposesEnrichedDocs(t *testing.T) {
+	t.Parallel()
+
+	templateRoot, _ := filepath.Abs("../..")
+	targetDir := t.TempDir()
+
+	// Pre-create files so adopt proposes them
+	mustWrite(t, filepath.Join(targetDir, "docs", "ac-example.md"), "# Old example\n")
+	mustWrite(t, filepath.Join(targetDir, "docs", "build-release.md"), "# Old build release\n")
+	mustWrite(t, filepath.Join(targetDir, "AGENTS.md"), "# AGENTS.md\n\n## Purpose\n\nP.\n\n## Governed Sections\n\nG.\n\n## Interaction Mode\n\nI.\n\n## Approval Boundaries\n\nA.\n\n## Review Style\n\nR.\n\n## File-Change Discipline\n\nF.\n\n## Release Or Publish Triggers\n\nT.\n\n## Documentation Update Expectations\n\nD.\n")
+
+	cfg := Config{
+		Mode:     ModeAdopt,
+		Type:     RepoTypeCode,
+		Target:   targetDir,
+		RepoName: "test-repo",
+		Purpose:  "test purpose",
+		Stack:    "Go CLI",
+	}
+	if err := runNewOrAdopt(templateRoot, cfg, true); err != nil {
+		t.Fatalf("runNewOrAdopt() error = %v", err)
+	}
+
+	// Originals preserved
+	oldExample, _ := os.ReadFile(filepath.Join(targetDir, "docs", "ac-example.md"))
+	if !strings.Contains(string(oldExample), "Old example") {
+		t.Fatal("adopt should preserve existing ac-example.md")
+	}
+
+	// Proposals should exist
+	exampleProposal := proposalPath(filepath.Join(targetDir, "docs", "ac-example.md"))
+	if _, err := os.Stat(exampleProposal); err != nil {
+		t.Fatalf("expected ac-example.md proposal, got error: %v", err)
+	}
+	brProposal := proposalPath(filepath.Join(targetDir, "docs", "build-release.md"))
+	if _, err := os.Stat(brProposal); err != nil {
+		t.Fatalf("expected build-release.md proposal, got error: %v", err)
+	}
+
+	// Proposed build-release.md should contain both new sections
+	brContent, _ := os.ReadFile(brProposal)
+	if !strings.Contains(string(brContent), "## Template Upgrade") {
+		t.Fatal("proposed build-release.md should contain Template Upgrade section")
+	}
+	if !strings.Contains(string(brContent), "## Release Artifacts") {
+		t.Fatal("proposed build-release.md should contain Release Artifacts section")
+	}
+}
+
 func mustWrite(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
