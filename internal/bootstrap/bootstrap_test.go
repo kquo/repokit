@@ -253,6 +253,7 @@ Base purpose.
 
 - Update docs with behavior.
 `)
+	// Reference has a subset of the template's constraints using identical text.
 	mustWrite(t, filepath.Join(referenceRoot, "AGENTS.md"), `# AGENTS.md
 
 ## Purpose
@@ -265,7 +266,7 @@ Base purpose.
 
 ## Interaction Mode
 
-- Treat all input as exploratory discussion.
+- Treat requests as exploratory discussion unless the user explicitly asks for implementation or file changes.
 - Do not create artifacts or make changes unless the user explicitly authorizes them.
 
 ## Approval Boundaries
@@ -1281,6 +1282,1053 @@ func TestPlanRenderNonGoStackSkipsGoFiles(t *testing.T) {
 		if strings.HasSuffix(op.path, "main.go") || strings.HasSuffix(op.path, "color.go") {
 			t.Fatalf("non-Go stack should not include Go files, found %q", op.path)
 		}
+	}
+}
+
+// --- AC-006 Phase 1: constraint-level governance comparison ---
+
+func TestExtractConstraintsBulletList(t *testing.T) {
+	t.Parallel()
+	body := "- Do not release without approval.\n- Keep changes targeted.\n- Surface assumptions before acting.\n"
+	got := extractConstraints(body)
+	if len(got) != 3 {
+		t.Fatalf("extractConstraints() returned %d constraints, want 3", len(got))
+	}
+}
+
+func TestExtractConstraintsMultiLineBullet(t *testing.T) {
+	t.Parallel()
+	body := "- Do not release without approval\n  unless the user explicitly asks.\n- Keep changes targeted.\n"
+	got := extractConstraints(body)
+	if len(got) != 2 {
+		t.Fatalf("extractConstraints() returned %d constraints, want 2", len(got))
+	}
+	if !strings.Contains(got[0], "unless") {
+		t.Fatalf("first constraint should include continuation line, got %q", got[0])
+	}
+}
+
+func TestExtractConstraintsNumberedList(t *testing.T) {
+	t.Parallel()
+	body := "1. Do not release without approval.\n2. Keep changes targeted.\n3. Surface assumptions before acting.\n"
+	got := extractConstraints(body)
+	if len(got) != 3 {
+		t.Fatalf("extractConstraints() returned %d constraints, want 3", len(got))
+	}
+}
+
+func TestConstraintsCoveredBulletsVsNumbered(t *testing.T) {
+	t.Parallel()
+	bullets := "- Do not release without approval.\n- Keep changes targeted.\n"
+	numbered := "1. Do not release without approval.\n2. Keep changes targeted.\n"
+	if !constraintsCovered(bullets, numbered) {
+		t.Fatal("numbered list constraints should match equivalent bullet constraints")
+	}
+	if !constraintsCovered(numbered, bullets) {
+		t.Fatal("bullet constraints should match equivalent numbered list constraints")
+	}
+}
+
+func TestExtractConstraintsEmpty(t *testing.T) {
+	t.Parallel()
+	got := extractConstraints("")
+	if len(got) != 0 {
+		t.Fatalf("extractConstraints('') returned %d constraints, want 0", len(got))
+	}
+}
+
+func TestConstraintsCoveredSubset(t *testing.T) {
+	t.Parallel()
+	template := "- Do not release without approval.\n- Keep changes targeted.\n- Surface assumptions.\n"
+	reference := "- Do not release without approval.\n- Keep changes targeted.\n"
+	if !constraintsCovered(template, reference) {
+		t.Fatal("template constraints should cover reference subset")
+	}
+}
+
+func TestConstraintsCoveredSameKeywordsDifferentConstraints(t *testing.T) {
+	t.Parallel()
+	template := "- Do not create artifacts or make changes unless the user explicitly authorizes them.\n"
+	reference := "- Do not create, deploy, or publish artifacts unless the user explicitly authorizes them; security-sensitive changes require two-person review.\n"
+	if constraintsCovered(template, reference) {
+		t.Fatal("different constraint text should not be considered covered")
+	}
+}
+
+func TestConstraintsCoveredIdentical(t *testing.T) {
+	t.Parallel()
+	body := "- Do not release without approval.\n- Keep changes targeted.\n"
+	if !constraintsCovered(body, body) {
+		t.Fatal("identical constraints should be covered")
+	}
+}
+
+func TestConstraintsCoveredEmptyReference(t *testing.T) {
+	t.Parallel()
+	if !constraintsCovered("- Some constraint.\n", "") {
+		t.Fatal("empty reference should be considered covered")
+	}
+}
+
+func TestGovernanceSameKeywordsDifferentConstraintsProducesCandidate(t *testing.T) {
+	t.Parallel()
+
+	templateRoot := t.TempDir()
+	referenceRoot := filepath.Join(t.TempDir(), "ref")
+	if err := os.MkdirAll(referenceRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	mustWrite(t, filepath.Join(templateRoot, "base", "AGENTS.md"), `# AGENTS.md
+
+## Purpose
+
+Base purpose.
+
+## Interaction Mode
+
+- Treat requests as exploratory discussion unless the user explicitly asks for implementation or file changes.
+- Do not create artifacts or make changes unless the user explicitly authorizes them.
+
+## Approval Boundaries
+
+- Do not release without approval.
+
+## Review Style
+
+- Findings first.
+
+## File-Change Discipline
+
+- Prefer targeted edits.
+
+## Release Or Publish Triggers
+
+- Release only on request.
+
+## Documentation Update Expectations
+
+- Update docs with behavior.
+`)
+	// Same keywords but materially different constraint for Interaction Mode.
+	mustWrite(t, filepath.Join(referenceRoot, "AGENTS.md"), `# AGENTS.md
+
+## Purpose
+
+Base purpose.
+
+## Interaction Mode
+
+- Treat requests as exploratory discussion unless the user explicitly asks for implementation or file changes.
+- Do not create, deploy, or publish artifacts unless the user explicitly authorizes them; security-sensitive changes require two-person review.
+
+## Approval Boundaries
+
+- Do not release without approval.
+
+## Review Style
+
+- Findings first.
+
+## File-Change Discipline
+
+- Prefer targeted edits.
+
+## Release Or Publish Triggers
+
+- Release only on request.
+
+## Documentation Update Expectations
+
+- Update docs with behavior.
+`)
+
+	report, err := ReviewEnhancement(templateRoot, referenceRoot)
+	if err != nil {
+		t.Fatalf("ReviewEnhancement() error = %v", err)
+	}
+	found := false
+	for _, c := range report.Candidates {
+		if c.Area == "base governance" && c.Section == "Interaction Mode" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("expected candidate for Interaction Mode with different constraints despite same keywords")
+	}
+}
+
+// --- AC-006 Phase 1: section-level file diffing ---
+
+func TestDiffMarkdownSectionsOneSectionDiffers(t *testing.T) {
+	t.Parallel()
+	template := "# Title\n\n## Section A\n\nSame content.\n\n## Section B\n\nTemplate version.\n"
+	reference := "# Title\n\n## Section A\n\nSame content.\n\n## Section B\n\nReference version.\n"
+	got := diffMarkdownSections(template, reference)
+	if len(got) != 1 || got[0] != "Section B" {
+		t.Fatalf("diffMarkdownSections() = %v, want [Section B]", got)
+	}
+}
+
+func TestDiffMarkdownSectionsNewSectionInReference(t *testing.T) {
+	t.Parallel()
+	template := "# Title\n\n## Section A\n\nContent.\n"
+	reference := "# Title\n\n## Section A\n\nContent.\n\n## Section B\n\nNew section.\n"
+	got := diffMarkdownSections(template, reference)
+	if len(got) != 1 || got[0] != "Section B" {
+		t.Fatalf("diffMarkdownSections() = %v, want [Section B]", got)
+	}
+}
+
+func TestDiffMarkdownSectionsIdentical(t *testing.T) {
+	t.Parallel()
+	content := "# Title\n\n## Section A\n\nContent.\n\n## Section B\n\nMore.\n"
+	got := diffMarkdownSections(content, content)
+	if len(got) != 0 {
+		t.Fatalf("diffMarkdownSections() = %v, want empty", got)
+	}
+}
+
+func TestDiffMarkdownSectionsTemplateOnlySection(t *testing.T) {
+	t.Parallel()
+	template := "# Title\n\n## Section A\n\nContent.\n\n## Section B\n\nExtra.\n"
+	reference := "# Title\n\n## Section A\n\nContent.\n"
+	got := diffMarkdownSections(template, reference)
+	if len(got) != 1 || got[0] != "Section B" {
+		t.Fatalf("diffMarkdownSections() = %v, want [Section B] for template-only section", got)
+	}
+}
+
+func TestDiffMarkdownSectionsNoStructureFallback(t *testing.T) {
+	t.Parallel()
+	template := "Just plain text without any headings.\n"
+	reference := "Different plain text without any headings.\n"
+	got := diffMarkdownSections(template, reference)
+	if got != nil {
+		t.Fatalf("diffMarkdownSections() = %v, want nil for unstructured files", got)
+	}
+}
+
+func TestReviewMappedFilePopulatesDeltaSections(t *testing.T) {
+	t.Parallel()
+
+	templateRoot := t.TempDir()
+	referenceRoot := t.TempDir()
+
+	mustWrite(t, filepath.Join(templateRoot, "overlays", "code", "files", "docs", "arch.md.tmpl"),
+		"# Arch\n\n## Overview\n\nSame.\n\n## Stack\n\nTemplate stack.\n")
+	mustWrite(t, filepath.Join(referenceRoot, "docs", "arch.md"),
+		"# Arch\n\n## Overview\n\nSame.\n\n## Stack\n\nDifferent stack info.\n")
+
+	item := enhancementMapping{
+		Area:           "CODE overlay",
+		ReferencePaths: []string{"docs/arch.md"},
+		TemplateTarget: filepath.Join("overlays", "code", "files", "docs", "arch.md.tmpl"),
+	}
+	candidate, ok, err := reviewMappedFile(templateRoot, referenceRoot, item, nil)
+	if err != nil {
+		t.Fatalf("reviewMappedFile() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("expected a candidate")
+	}
+	if len(candidate.DeltaSections) != 1 || candidate.DeltaSections[0] != "Stack" {
+		t.Fatalf("DeltaSections = %v, want [Stack]", candidate.DeltaSections)
+	}
+}
+
+func TestReviewMappedFileNoDeltaSectionsForUnstructured(t *testing.T) {
+	t.Parallel()
+
+	templateRoot := t.TempDir()
+	referenceRoot := t.TempDir()
+
+	mustWrite(t, filepath.Join(templateRoot, "TEMPLATE_VERSION"), "0.1.0\n")
+	mustWrite(t, filepath.Join(referenceRoot, "TEMPLATE_VERSION"), "0.2.0\n")
+
+	item := enhancementMapping{
+		Area:           "upgrade path",
+		ReferencePaths: []string{"TEMPLATE_VERSION"},
+		TemplateTarget: "TEMPLATE_VERSION",
+	}
+	candidate, ok, err := reviewMappedFile(templateRoot, referenceRoot, item, nil)
+	if err != nil {
+		t.Fatalf("reviewMappedFile() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("expected a candidate")
+	}
+	if candidate.DeltaSections != nil {
+		t.Fatalf("DeltaSections = %v, want nil for unstructured file", candidate.DeltaSections)
+	}
+}
+
+// --- AC-006 Phase 1: summary and AC doc rendering with delta sections ---
+
+func TestFormatCandidateLineIncludesDeltaSections(t *testing.T) {
+	t.Parallel()
+
+	candidate := EnhancementCandidate{
+		Area:            "CODE overlay",
+		Path:            "/tmp/ref/docs/arch.md",
+		Disposition:     "adapt",
+		Portability:     "needs-review",
+		TemplateTarget:  "overlays/code/files/docs/arch.md.tmpl",
+		Summary:         "headings: Arch, Overview, Stack",
+		CollisionImpact: "medium",
+		DeltaSections:   []string{"Stack", "Dependencies"},
+	}
+
+	line := formatCandidateLine(candidate, "/tmp/ref")
+	if !strings.Contains(line, "delta-sections=Stack,Dependencies") {
+		t.Fatalf("expected delta-sections in line, got:\n%s", line)
+	}
+}
+
+func TestRenderACDocIncludesDeltaSections(t *testing.T) {
+	t.Parallel()
+
+	candidate := EnhancementCandidate{
+		Area:            "CODE overlay",
+		Path:            "/tmp/ref/docs/arch.md",
+		Disposition:     "adapt",
+		Reason:          "artifact may contain reusable structure",
+		Portability:     "needs-review",
+		TemplateTarget:  "overlays/code/files/docs/arch.md.tmpl",
+		Summary:         "headings: Arch, Overview, Stack",
+		CollisionImpact: "medium",
+		DeltaSections:   []string{"Stack", "Dependencies"},
+	}
+	report := EnhancementReport{ReferenceRoot: "/tmp/ref", Candidates: []EnhancementCandidate{candidate}}
+	doc := renderACDoc(candidate, nil, report, 7)
+
+	if !strings.Contains(doc, "Changed sections: Stack, Dependencies") {
+		t.Fatalf("expected 'Changed sections' in AC doc summary, got:\n%s", doc)
+	}
+	if !strings.Contains(doc, "- Section: `Stack`") {
+		t.Fatalf("expected Section: Stack in scope, got:\n%s", doc)
+	}
+	if !strings.Contains(doc, "- Section: `Dependencies`") {
+		t.Fatalf("expected Section: Dependencies in scope, got:\n%s", doc)
+	}
+}
+
+func TestRenderACDocNoDeltaSectionsKeepsLegacySection(t *testing.T) {
+	t.Parallel()
+
+	candidate := EnhancementCandidate{
+		Area:            "base governance",
+		Path:            "/tmp/ref/AGENTS.md",
+		Section:         "Interaction Mode",
+		Disposition:     "accept",
+		Reason:          "governance delta",
+		Portability:     "portable",
+		TemplateTarget:  "base/AGENTS.md",
+		CollisionImpact: "medium",
+	}
+	report := EnhancementReport{ReferenceRoot: "/tmp/ref", Candidates: []EnhancementCandidate{candidate}}
+	doc := renderACDoc(candidate, nil, report, 8)
+
+	if !strings.Contains(doc, "- Section: `Interaction Mode`") {
+		t.Fatalf("expected legacy Section field in scope when no DeltaSections, got:\n%s", doc)
+	}
+	if strings.Contains(doc, "Changed sections") {
+		t.Fatalf("should not include 'Changed sections' without DeltaSections")
+	}
+}
+
+// --- AC-006 Phase 2: bootstrap writes manifest ---
+
+func TestBootstrapNewWritesManifest(t *testing.T) {
+	t.Parallel()
+
+	templateRoot, _ := filepath.Abs("../..")
+	targetDir := t.TempDir()
+
+	cfg := Config{
+		Mode:     ModeNew,
+		Type:     RepoTypeCode,
+		Target:   targetDir,
+		RepoName: "test-repo",
+		Purpose:  "test purpose",
+		Stack:    "Go CLI",
+	}
+	if err := runNewOrAdopt(templateRoot, cfg, false); err != nil {
+		t.Fatalf("runNewOrAdopt() error = %v", err)
+	}
+
+	manifestPath := filepath.Join(targetDir, manifestFileName)
+	content, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("manifest not written: %v", err)
+	}
+	m, err := parseManifest(string(content))
+	if err != nil {
+		t.Fatalf("parseManifest() error = %v", err)
+	}
+	if m.TemplateVersion == "" {
+		t.Fatal("manifest has empty template version")
+	}
+	em := manifestEntryMap(m)
+	if _, ok := em["AGENTS.md"]; !ok {
+		t.Fatal("manifest missing AGENTS.md entry")
+	}
+	if _, ok := em["TEMPLATE_VERSION"]; !ok {
+		t.Fatal("manifest missing TEMPLATE_VERSION entry")
+	}
+	agents := em["AGENTS.md"]
+	if agents.SourcePath == "" || agents.SourceChecksum == "" {
+		t.Fatal("AGENTS.md manifest entry missing source info")
+	}
+}
+
+func TestBootstrapAdoptWritesManifestWithCanonicalChecksums(t *testing.T) {
+	t.Parallel()
+
+	templateRoot, _ := filepath.Abs("../..")
+	targetDir := t.TempDir()
+
+	// Pre-create AGENTS.md so adopt proposes instead of writing
+	mustWrite(t, filepath.Join(targetDir, "AGENTS.md"), "# Existing AGENTS.md\n")
+	mustWrite(t, filepath.Join(targetDir, "TEMPLATE_VERSION"), "0.0.1\n")
+
+	cfg := Config{
+		Mode:     ModeAdopt,
+		Type:     RepoTypeCode,
+		Target:   targetDir,
+		RepoName: "test-repo",
+		Purpose:  "test purpose",
+		Stack:    "Go CLI",
+	}
+	if err := runNewOrAdopt(templateRoot, cfg, true); err != nil {
+		t.Fatalf("runNewOrAdopt() error = %v", err)
+	}
+
+	manifestPath := filepath.Join(targetDir, manifestFileName)
+	content, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("manifest not written in adopt mode: %v", err)
+	}
+	m, err := parseManifest(string(content))
+	if err != nil {
+		t.Fatalf("parseManifest() error = %v", err)
+	}
+
+	em := manifestEntryMap(m)
+	// Manifest should have AGENTS.md with canonical checksum (what template would produce),
+	// even though adopt mode proposed instead of overwriting the existing file.
+	agents, ok := em["AGENTS.md"]
+	if !ok {
+		t.Fatal("manifest missing AGENTS.md entry in adopt mode")
+	}
+	if agents.Checksum == "" {
+		t.Fatal("AGENTS.md manifest entry has empty checksum")
+	}
+	if agents.SourcePath == "" || agents.SourceChecksum == "" {
+		t.Fatal("AGENTS.md manifest entry missing source info in adopt mode")
+	}
+
+	// Verify the checksum is of the canonical (template-rendered) content, not the existing file
+	existingChecksum := computeChecksum("# Existing AGENTS.md\n")
+	if agents.Checksum == existingChecksum {
+		t.Fatal("manifest should record canonical template checksum, not the existing file's checksum")
+	}
+}
+
+// --- AC-006 Phase 2: three-way enhance with manifest ---
+
+func writeManifestFile(t *testing.T, dir string, m Manifest) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, manifestFileName), []byte(formatManifest(m)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEnhanceWithManifestUserChangeOnly(t *testing.T) {
+	t.Parallel()
+
+	templateRoot := t.TempDir()
+	referenceRoot := filepath.Join(t.TempDir(), "ref")
+	if err := os.MkdirAll(referenceRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	templateAgents := "# AGENTS.md\n\n## Purpose\n\nBase purpose.\n\n## Interaction Mode\n\n- Default to discussion first.\n"
+	mustWrite(t, filepath.Join(templateRoot, "base", "AGENTS.md"), templateAgents)
+
+	// Reference has a user modification
+	refAgents := "# AGENTS.md\n\n## Purpose\n\nBase purpose.\n\n## Interaction Mode\n\n- Default to discussion first.\n- Added user rule about authorization.\n"
+	mustWrite(t, filepath.Join(referenceRoot, "AGENTS.md"), refAgents)
+
+	// Manifest records what the template produced at bootstrap time (matches current template)
+	writeManifestFile(t, referenceRoot, Manifest{
+		FormatVersion:   manifestFormatVersion,
+		TemplateVersion: "0.1.0",
+		Entries: []ManifestEntry{
+			{Path: "AGENTS.md", Kind: "file", Checksum: computeChecksum(templateAgents), SourcePath: "base/AGENTS.md", SourceChecksum: computeChecksum(templateAgents)},
+		},
+	})
+
+	report, err := ReviewEnhancement(templateRoot, referenceRoot)
+	if err != nil {
+		t.Fatalf("ReviewEnhancement() error = %v", err)
+	}
+
+	found := false
+	for _, c := range report.Candidates {
+		if c.Area == "base governance" && c.Section == "Interaction Mode" {
+			found = true
+			if c.ChangeOrigin != "user" {
+				t.Fatalf("ChangeOrigin = %q, want user", c.ChangeOrigin)
+			}
+			if c.Disposition == "defer" {
+				t.Fatal("user-only change should not be deferred")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected candidate for user-modified Interaction Mode")
+	}
+}
+
+func TestEnhanceWithManifestTemplateChangeOnly(t *testing.T) {
+	t.Parallel()
+
+	templateRoot := t.TempDir()
+	referenceRoot := filepath.Join(t.TempDir(), "ref")
+	if err := os.MkdirAll(referenceRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Old template source (at bootstrap time)
+	oldTemplateSource := "# AGENTS old\n"
+	// Current template source (evolved)
+	newTemplateSource := "# AGENTS updated\n"
+	mustWrite(t, filepath.Join(templateRoot, "base", "AGENTS.md"), newTemplateSource)
+
+	// Reference still has the old rendered content (user didn't touch it)
+	oldRendered := "# AGENTS old rendered\n"
+	mustWrite(t, filepath.Join(referenceRoot, "AGENTS.md"), oldRendered)
+
+	// Manifest: rendered checksum matches current reference, source checksum is OLD template
+	writeManifestFile(t, referenceRoot, Manifest{
+		FormatVersion:   manifestFormatVersion,
+		TemplateVersion: "0.1.0",
+		Entries: []ManifestEntry{
+			{Path: "AGENTS.md", Kind: "file", Checksum: computeChecksum(oldRendered), SourcePath: "base/AGENTS.md", SourceChecksum: computeChecksum(oldTemplateSource)},
+		},
+	})
+
+	report, err := ReviewEnhancement(templateRoot, referenceRoot)
+	if err != nil {
+		t.Fatalf("ReviewEnhancement() error = %v", err)
+	}
+
+	// Template-only change on AGENTS.md → section candidates should be skipped entirely
+	for _, c := range report.Candidates {
+		if c.Area == "base governance" {
+			t.Fatalf("template-only change should produce no governance candidates, got section=%q", c.Section)
+		}
+	}
+}
+
+func TestEnhanceWithManifestBothChanged(t *testing.T) {
+	t.Parallel()
+
+	templateRoot := t.TempDir()
+	referenceRoot := filepath.Join(t.TempDir(), "ref")
+	if err := os.MkdirAll(referenceRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldTemplateSource := "# AGENTS.md\n\n## Purpose\n\nOld purpose.\n\n## Interaction Mode\n\n- Old rule.\n"
+	newTemplateSource := "# AGENTS.md\n\n## Purpose\n\nNew purpose.\n\n## Interaction Mode\n\n- Updated rule.\n"
+	mustWrite(t, filepath.Join(templateRoot, "base", "AGENTS.md"), newTemplateSource)
+
+	oldRendered := "# AGENTS.md\n\n## Purpose\n\nOld purpose.\n\n## Interaction Mode\n\n- Old rule.\n"
+	userModified := "# AGENTS.md\n\n## Purpose\n\nOld purpose.\n\n## Interaction Mode\n\n- Old rule.\n- User added constraint.\n"
+	mustWrite(t, filepath.Join(referenceRoot, "AGENTS.md"), userModified)
+
+	writeManifestFile(t, referenceRoot, Manifest{
+		FormatVersion:   manifestFormatVersion,
+		TemplateVersion: "0.1.0",
+		Entries: []ManifestEntry{
+			{Path: "AGENTS.md", Kind: "file", Checksum: computeChecksum(oldRendered), SourcePath: "base/AGENTS.md", SourceChecksum: computeChecksum(oldTemplateSource)},
+		},
+	})
+
+	report, err := ReviewEnhancement(templateRoot, referenceRoot)
+	if err != nil {
+		t.Fatalf("ReviewEnhancement() error = %v", err)
+	}
+
+	found := false
+	for _, c := range report.Candidates {
+		if c.Area == "base governance" {
+			found = true
+			if c.ChangeOrigin != "both" {
+				t.Fatalf("ChangeOrigin = %q, want both", c.ChangeOrigin)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected candidate when both user and template changed")
+	}
+}
+
+func TestEnhanceWithManifestNeitherChanged(t *testing.T) {
+	t.Parallel()
+
+	templateRoot := t.TempDir()
+	referenceRoot := filepath.Join(t.TempDir(), "ref")
+	if err := os.MkdirAll(referenceRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	templateSource := "# AGENTS.md\n\n## Purpose\n\nBase purpose.\n\n## Interaction Mode\n\n- Default rule.\n"
+	rendered := "# AGENTS.md\n\n## Purpose\n\nBase purpose.\n\n## Interaction Mode\n\n- Default rule.\n"
+	mustWrite(t, filepath.Join(templateRoot, "base", "AGENTS.md"), templateSource)
+	mustWrite(t, filepath.Join(referenceRoot, "AGENTS.md"), rendered)
+
+	writeManifestFile(t, referenceRoot, Manifest{
+		FormatVersion:   manifestFormatVersion,
+		TemplateVersion: "0.1.0",
+		Entries: []ManifestEntry{
+			{Path: "AGENTS.md", Kind: "file", Checksum: computeChecksum(rendered), SourcePath: "base/AGENTS.md", SourceChecksum: computeChecksum(templateSource)},
+		},
+	})
+
+	report, err := ReviewEnhancement(templateRoot, referenceRoot)
+	if err != nil {
+		t.Fatalf("ReviewEnhancement() error = %v", err)
+	}
+
+	for _, c := range report.Candidates {
+		if c.Area == "base governance" {
+			t.Fatal("neither-changed should produce no governance candidates")
+		}
+	}
+}
+
+func TestEnhanceWithoutManifestFallback(t *testing.T) {
+	t.Parallel()
+
+	templateRoot := t.TempDir()
+	referenceRoot := filepath.Join(t.TempDir(), "ref")
+	if err := os.MkdirAll(referenceRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	mustWrite(t, filepath.Join(templateRoot, "base", "AGENTS.md"), "# AGENTS.md\n\n## Purpose\n\nBase purpose.\n\n## Interaction Mode\n\n- Default rule.\n")
+	mustWrite(t, filepath.Join(referenceRoot, "AGENTS.md"), "# AGENTS.md\n\n## Purpose\n\nBase purpose.\n\n## Interaction Mode\n\n- Default rule.\n- Extra user rule.\n")
+
+	// No manifest file → two-way fallback
+	report, err := ReviewEnhancement(templateRoot, referenceRoot)
+	if err != nil {
+		t.Fatalf("ReviewEnhancement() error = %v", err)
+	}
+
+	found := false
+	for _, c := range report.Candidates {
+		if c.Area == "base governance" && c.Section == "Interaction Mode" {
+			found = true
+			if c.ChangeOrigin != "" {
+				t.Fatalf("ChangeOrigin = %q, want empty for no-manifest fallback", c.ChangeOrigin)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected candidate in no-manifest two-way fallback")
+	}
+}
+
+func TestEnhanceMappedFileTemplateOnlyDeferred(t *testing.T) {
+	t.Parallel()
+
+	templateRoot := t.TempDir()
+	referenceRoot := t.TempDir()
+
+	oldSource := "# Old README template\n"
+	newSource := "# New README template\n"
+	mustWrite(t, filepath.Join(templateRoot, "overlays", "code", "files", "README.md.tmpl"), newSource)
+
+	rendered := "# Old README rendered\n"
+	mustWrite(t, filepath.Join(referenceRoot, "README.md"), rendered)
+
+	mmap := map[string]ManifestEntry{
+		"README.md": {Path: "README.md", Kind: "file", Checksum: computeChecksum(rendered), SourcePath: "overlays/code/files/README.md.tmpl", SourceChecksum: computeChecksum(oldSource)},
+	}
+
+	item := enhancementMapping{
+		Area:           "CODE overlay",
+		ReferencePaths: []string{"README.md"},
+		TemplateTarget: filepath.Join("overlays", "code", "files", "README.md.tmpl"),
+	}
+	candidate, ok, err := reviewMappedFile(templateRoot, referenceRoot, item, mmap)
+	if err != nil {
+		t.Fatalf("reviewMappedFile() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("expected a candidate for template-only change")
+	}
+	if candidate.ChangeOrigin != "template" {
+		t.Fatalf("ChangeOrigin = %q, want template", candidate.ChangeOrigin)
+	}
+	if candidate.Disposition != "defer" {
+		t.Fatalf("Disposition = %q, want defer for template-only change", candidate.Disposition)
+	}
+}
+
+func TestFormatCandidateLineIncludesChangeOrigin(t *testing.T) {
+	t.Parallel()
+
+	candidate := EnhancementCandidate{
+		Area:            "CODE overlay",
+		Path:            "/tmp/ref/README.md",
+		Disposition:     "accept",
+		Portability:     "portable",
+		TemplateTarget:  "overlays/code/files/README.md.tmpl",
+		CollisionImpact: "medium",
+		ChangeOrigin:    "user",
+	}
+
+	line := formatCandidateLine(candidate, "/tmp/ref")
+	if !strings.Contains(line, "change-origin=user") {
+		t.Fatalf("expected change-origin in line, got:\n%s", line)
+	}
+}
+
+func TestRenderACDocIncludesChangeOrigin(t *testing.T) {
+	t.Parallel()
+
+	candidate := EnhancementCandidate{
+		Area:            "CODE overlay",
+		Path:            "/tmp/ref/README.md",
+		Disposition:     "accept",
+		Reason:          "improvement found",
+		Portability:     "portable",
+		TemplateTarget:  "overlays/code/files/README.md.tmpl",
+		CollisionImpact: "medium",
+		ChangeOrigin:    "both",
+	}
+	report := EnhancementReport{ReferenceRoot: "/tmp/ref", Candidates: []EnhancementCandidate{candidate}}
+	doc := renderACDoc(candidate, nil, report, 9)
+
+	if !strings.Contains(doc, "Change origin: `both`") {
+		t.Fatalf("expected 'Change origin' in AC doc, got:\n%s", doc)
+	}
+}
+
+// --- AC-006 Phase 3: classifier extensibility ---
+
+func TestClassifyEnhancementDefaultRulesProjectSpecific(t *testing.T) {
+	t.Parallel()
+	p, d, _ := classifyEnhancement("This mentions skout repo name", "/tmp/skout", "overlays/code/files/README.md.tmpl", false)
+	if p != "project-specific" || d != "defer" {
+		t.Fatalf("project-specific: got portability=%q disposition=%q", p, d)
+	}
+}
+
+func TestClassifyEnhancementDefaultRulesGovernance(t *testing.T) {
+	t.Parallel()
+	p, d, _ := classifyEnhancement("generic content", "/tmp/ref", "base/AGENTS.md", true)
+	if p != "portable" || d != "accept" {
+		t.Fatalf("governance: got portability=%q disposition=%q", p, d)
+	}
+}
+
+func TestClassifyEnhancementDefaultRulesWorkflowHelper(t *testing.T) {
+	t.Parallel()
+	for _, target := range []string{"overlays/code/files/cmd/build/main.go.tmpl", "overlays/code/files/build.sh.tmpl", "TEMPLATE_VERSION"} {
+		p, d, _ := classifyEnhancement("generic content", "/tmp/ref", target, false)
+		if p != "portable" || d != "accept" {
+			t.Fatalf("workflow helper %q: got portability=%q disposition=%q", target, p, d)
+		}
+	}
+}
+
+func TestClassifyEnhancementDefaultRulesFallback(t *testing.T) {
+	t.Parallel()
+	p, d, _ := classifyEnhancement("generic content", "/tmp/ref", "overlays/code/files/README.md.tmpl", false)
+	if p != "needs-review" || d != "adapt" {
+		t.Fatalf("fallback: got portability=%q disposition=%q", p, d)
+	}
+}
+
+func TestProjectSpecificMarkersRepoName(t *testing.T) {
+	t.Parallel()
+	markers := projectSpecificMarkers("This mentions skout in the content", "/tmp/skout")
+	if len(markers) != 1 || markers[0] != "mentions reference repo name" {
+		t.Fatalf("markers = %v, want [mentions reference repo name]", markers)
+	}
+}
+
+func TestProjectSpecificMarkersAbsolutePath(t *testing.T) {
+	t.Parallel()
+	markers := projectSpecificMarkers("path is /Users/dev/code", "/tmp/ref")
+	if len(markers) != 1 || markers[0] != "contains absolute user path" {
+		t.Fatalf("markers = %v, want [contains absolute user path]", markers)
+	}
+}
+
+func TestProjectSpecificMarkersNone(t *testing.T) {
+	t.Parallel()
+	markers := projectSpecificMarkers("generic content", "/tmp/ref")
+	if len(markers) != 0 {
+		t.Fatalf("markers = %v, want empty", markers)
+	}
+}
+
+func TestCustomClassificationRuleOverridesDefault(t *testing.T) {
+	// No t.Parallel() — mutates package-global defaultClassificationRules
+	original := defaultClassificationRules
+	defer func() { defaultClassificationRules = original }()
+
+	custom := classificationRule{
+		Name:        "custom-override",
+		Priority:    50, // lower than project-specific (100), so it wins
+		Match:       func(ctx classificationContext) bool { return strings.Contains(ctx.Content, "CUSTOM_MARKER") },
+		Portability: "portable", Disposition: "accept",
+		Reason: "custom rule matched",
+	}
+	defaultClassificationRules = append(defaultClassificationRules, custom)
+
+	p, d, r := classifyEnhancement("content with CUSTOM_MARKER here", "/tmp/ref", "overlays/code/files/README.md.tmpl", false)
+	if p != "portable" || d != "accept" || r != "custom rule matched" {
+		t.Fatalf("custom rule: got portability=%q disposition=%q reason=%q", p, d, r)
+	}
+
+	// Without the marker, falls through to default
+	p2, d2, _ := classifyEnhancement("generic content", "/tmp/ref", "overlays/code/files/README.md.tmpl", false)
+	if p2 != "needs-review" || d2 != "adapt" {
+		t.Fatalf("fallthrough: got portability=%q disposition=%q", p2, d2)
+	}
+}
+
+func TestCustomMarkerRuleEvaluated(t *testing.T) {
+	// No t.Parallel() — mutates package-global defaultMarkerRules
+	original := defaultMarkerRules
+	defer func() { defaultMarkerRules = original }()
+
+	defaultMarkerRules = append(defaultMarkerRules, markerRule{
+		Name: "contains secret path",
+		Match: func(content, _ string) bool {
+			return strings.Contains(content, ".secrets/")
+		},
+	})
+
+	markers := projectSpecificMarkers("found .secrets/ in config", "/tmp/ref")
+	found := false
+	for _, m := range markers {
+		if m == "contains secret path" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("custom marker not found, markers = %v", markers)
+	}
+}
+
+func TestCustomSignalDefRecognized(t *testing.T) {
+	// No t.Parallel() — mutates package-global defaultSignalDefs
+	original := defaultSignalDefs["Review Style"]
+	defer func() { defaultSignalDefs["Review Style"] = original }()
+
+	defaultSignalDefs["Review Style"] = append(defaultSignalDefs["Review Style"], signalDef{
+		Name:  "review-security",
+		Match: func(t string) bool { return containsAny(t, "security", "vulnerability") },
+	})
+
+	signals := sectionSignals("Review Style", "- Check for security vulnerabilities before merging.")
+	if !signals["review-security"] {
+		t.Fatalf("custom signal not detected, signals = %v", signals)
+	}
+}
+
+func TestSectionSignalsUnknownSectionReturnsEmpty(t *testing.T) {
+	t.Parallel()
+	signals := sectionSignals("Nonexistent Section", "some body text")
+	if len(signals) != 0 {
+		t.Fatalf("unknown section should return empty signals, got %v", signals)
+	}
+}
+
+func TestClassificationRulesNoMatchFallsThrough(t *testing.T) {
+	// No t.Parallel() — mutates package-global defaultClassificationRules
+	original := defaultClassificationRules
+	defer func() { defaultClassificationRules = original }()
+
+	// Replace with rules that never match (except catch-all)
+	defaultClassificationRules = []classificationRule{
+		{Name: "never-match", Match: func(_ classificationContext) bool { return false }, Portability: "x", Disposition: "x", Reason: "x"},
+		{Name: "catch-all", Match: func(_ classificationContext) bool { return true }, Portability: "needs-review", Disposition: "adapt", Reason: "catch-all"},
+	}
+
+	p, d, r := classifyEnhancement("anything", "/tmp/ref", "any-target", false)
+	if p != "needs-review" || d != "adapt" || r != "catch-all" {
+		t.Fatalf("catch-all: got portability=%q disposition=%q reason=%q", p, d, r)
+	}
+}
+
+// --- AC-006 Phase 4: assisted apply ---
+
+// setupEnhanceFixture creates a template root and reference root for enhance tests.
+// Returns (templateRoot, referenceRoot). The reference has a modified Interaction Mode.
+func setupEnhanceFixture(t *testing.T) (string, string) {
+	t.Helper()
+	templateRoot := t.TempDir()
+	referenceRoot := filepath.Join(t.TempDir(), "ref")
+	if err := os.MkdirAll(referenceRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(templateRoot, "base", "AGENTS.md"), "# AGENTS.md\n\n## Purpose\n\nBase purpose.\n\n## Interaction Mode\n\n- Default to discussion first.\n")
+	mustWrite(t, filepath.Join(templateRoot, "docs", "ac-template.md"), "# AC template\n")
+	mustWrite(t, filepath.Join(referenceRoot, "AGENTS.md"), "# AGENTS.md\n\n## Purpose\n\nBase purpose.\n\n## Interaction Mode\n\n- Default to discussion first.\n- Added authorization rule.\n")
+	return templateRoot, referenceRoot
+}
+
+func TestRunEnhanceApplyWritesProposal(t *testing.T) {
+	t.Parallel()
+	templateRoot, referenceRoot := setupEnhanceFixture(t)
+
+	cfg := Config{Mode: ModeEnhance, Reference: referenceRoot, Apply: true}
+	if err := RunEnhance(templateRoot, cfg); err != nil {
+		t.Fatalf("RunEnhance() error = %v", err)
+	}
+
+	// AC doc should still be created
+	acDoc := findACDoc(t, filepath.Join(templateRoot, "docs"))
+	if acDoc == "" {
+		t.Fatal("expected AC doc to be created even with --apply")
+	}
+
+	// Proposal should exist for AGENTS.md
+	proposal := proposalPath(filepath.Join(templateRoot, "base", "AGENTS.md"))
+	if _, err := os.Stat(proposal); err != nil {
+		t.Fatalf("expected proposal file at %s, got error: %v", proposal, err)
+	}
+
+	content, _ := os.ReadFile(proposal)
+	if !strings.Contains(string(content), "Added authorization rule") {
+		t.Fatal("proposal should contain reference content")
+	}
+}
+
+func TestRunEnhanceApplyStillCreatesACDoc(t *testing.T) {
+	t.Parallel()
+	templateRoot, referenceRoot := setupEnhanceFixture(t)
+
+	cfg := Config{Mode: ModeEnhance, Reference: referenceRoot, Apply: true}
+	if err := RunEnhance(templateRoot, cfg); err != nil {
+		t.Fatalf("RunEnhance() error = %v", err)
+	}
+
+	acDoc := findACDoc(t, filepath.Join(templateRoot, "docs"))
+	if acDoc == "" {
+		t.Fatal("--apply should not skip AC doc creation")
+	}
+}
+
+func TestRunEnhanceApplyNewTargetStillWritesProposal(t *testing.T) {
+	t.Parallel()
+
+	templateRoot := t.TempDir()
+	referenceRoot := filepath.Join(t.TempDir(), "ref")
+	if err := os.MkdirAll(referenceRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	mustWrite(t, filepath.Join(templateRoot, "base", "AGENTS.md"), "# AGENTS.md\n\n## Purpose\n\nBase purpose.\n\n## Interaction Mode\n\n- Default to discussion first.\n")
+	mustWrite(t, filepath.Join(templateRoot, "docs", "ac-template.md"), "# AC template\n")
+	// Reference has a file that maps to a template target that does NOT exist
+	mustWrite(t, filepath.Join(referenceRoot, "AGENTS.md"), "# AGENTS.md\n\n## Purpose\n\nBase purpose.\n\n## Interaction Mode\n\n- Default to discussion first.\n- New constraint.\n")
+
+	cfg := Config{Mode: ModeEnhance, Reference: referenceRoot, Apply: true}
+	if err := RunEnhance(templateRoot, cfg); err != nil {
+		t.Fatalf("RunEnhance() error = %v", err)
+	}
+
+	// Even though base/AGENTS.md exists, proposal should be at the proposal path, not overwriting
+	proposal := proposalPath(filepath.Join(templateRoot, "base", "AGENTS.md"))
+	if _, err := os.Stat(proposal); err != nil {
+		t.Fatalf("expected proposal file, got error: %v", err)
+	}
+	// Live file should be unchanged
+	live, _ := os.ReadFile(filepath.Join(templateRoot, "base", "AGENTS.md"))
+	if strings.Contains(string(live), "New constraint") {
+		t.Fatal("--apply should not overwrite the live template file")
+	}
+}
+
+func TestRunEnhanceApplyDryRunWritesNothing(t *testing.T) {
+	t.Parallel()
+	templateRoot, referenceRoot := setupEnhanceFixture(t)
+
+	cfg := Config{Mode: ModeEnhance, Reference: referenceRoot, Apply: true, DryRun: true}
+	if err := RunEnhance(templateRoot, cfg); err != nil {
+		t.Fatalf("RunEnhance() error = %v", err)
+	}
+
+	// No AC doc
+	acDoc := findACDoc(t, filepath.Join(templateRoot, "docs"))
+	if acDoc != "" {
+		t.Fatalf("dry-run should not create AC doc, found: %s", acDoc)
+	}
+
+	// No proposal files
+	proposal := proposalPath(filepath.Join(templateRoot, "base", "AGENTS.md"))
+	if _, err := os.Stat(proposal); err == nil {
+		t.Fatal("dry-run should not create proposal files")
+	}
+}
+
+func TestValidateConfigApplyRequiresEnhance(t *testing.T) {
+	t.Parallel()
+	err := validateConfig(Config{Mode: ModeNew, Type: RepoTypeCode, RepoName: "r", Purpose: "p", Stack: "Go", Apply: true})
+	if err == nil {
+		t.Fatal("expected error for --apply with non-enhance mode")
+	}
+	if !strings.Contains(err.Error(), "--apply") {
+		t.Fatalf("error should mention --apply, got: %v", err)
+	}
+}
+
+func TestRunEnhanceWithoutApplyNoProposals(t *testing.T) {
+	t.Parallel()
+	templateRoot, referenceRoot := setupEnhanceFixture(t)
+
+	cfg := Config{Mode: ModeEnhance, Reference: referenceRoot}
+	if err := RunEnhance(templateRoot, cfg); err != nil {
+		t.Fatalf("RunEnhance() error = %v", err)
+	}
+
+	// Should create AC doc but no proposals
+	proposal := proposalPath(filepath.Join(templateRoot, "base", "AGENTS.md"))
+	if _, err := os.Stat(proposal); err == nil {
+		t.Fatal("enhance without --apply should not create proposal files")
+	}
+}
+
+func TestRunEnhanceApplyGovernanceProposesWholeFile(t *testing.T) {
+	t.Parallel()
+	templateRoot, referenceRoot := setupEnhanceFixture(t)
+
+	cfg := Config{Mode: ModeEnhance, Reference: referenceRoot, Apply: true}
+	if err := RunEnhance(templateRoot, cfg); err != nil {
+		t.Fatalf("RunEnhance() error = %v", err)
+	}
+
+	proposal := proposalPath(filepath.Join(templateRoot, "base", "AGENTS.md"))
+	content, err := os.ReadFile(proposal)
+	if err != nil {
+		t.Fatalf("expected governance proposal, got error: %v", err)
+	}
+	// Should contain the entire reference AGENTS.md, not just the changed section
+	if !strings.Contains(string(content), "## Purpose") {
+		t.Fatal("governance proposal should contain the full file, not just the changed section")
+	}
+	if !strings.Contains(string(content), "Added authorization rule") {
+		t.Fatal("governance proposal should contain the reference content")
 	}
 }
 

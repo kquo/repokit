@@ -20,7 +20,6 @@ Every new roadmap item should answer:
 
 ## Priorities
 
-- Safe refresh path: improve owned-section refresh without letting AGENTS.md or overlay files drift
 - CODE overlay: deeper release and upgrade guidance
 - CODE overlay: richer example acceptance-criteria docs
 - DOC overlay: richer platform-specific publishing examples

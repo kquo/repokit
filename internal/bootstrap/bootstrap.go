@@ -42,6 +42,7 @@ type Config struct {
 	Style              string
 	InitGit            bool
 	DryRun             bool
+	Apply              bool
 }
 
 type Assessment struct {
@@ -64,6 +65,8 @@ type EnhancementCandidate struct {
 	TemplateTarget  string
 	Summary         string
 	CollisionImpact string
+	DeltaSections   []string
+	ChangeOrigin    string
 }
 
 type EnhancementReport struct {
@@ -77,6 +80,7 @@ type operation struct {
 	note    string
 	content string
 	linkTo  string
+	source  string
 }
 
 type flagValues struct {
@@ -91,6 +95,7 @@ type flagValues struct {
 	style              string
 	initGit            bool
 	dryRun             bool
+	apply              bool
 }
 
 func ParseArgs(args []string) (Config, error) {
@@ -119,6 +124,8 @@ func ParseArgs(args []string) (Config, error) {
 	fs.BoolVar(&values.initGit, "init-git", false, "initialize git if target is not already a repo")
 	fs.BoolVar(&values.dryRun, "d", false, "preview changes without writing")
 	fs.BoolVar(&values.dryRun, "dry-run", false, "preview changes without writing")
+	fs.BoolVar(&values.apply, "a", false, "write .template-proposed files for actionable candidates (enhance only)")
+	fs.BoolVar(&values.apply, "apply", false, "write .template-proposed files for actionable candidates (enhance only)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: bootstrap -m, --mode new|adopt|enhance [options]\n")
 		fs.PrintDefaults()
@@ -148,6 +155,7 @@ func ParseArgs(args []string) (Config, error) {
 		Style:              strings.TrimSpace(values.style),
 		InitGit:            values.initGit,
 		DryRun:             values.dryRun,
+		Apply:              values.apply,
 	}
 	return cfg, validateConfig(cfg)
 }
@@ -221,6 +229,9 @@ func validateConfig(cfg Config) error {
 	default:
 		return errors.New("mode is required: use -m or --mode")
 	}
+	if cfg.Apply && cfg.Mode != ModeEnhance {
+		return errors.New("--apply is only valid with --mode enhance")
+	}
 	return nil
 }
 
@@ -265,10 +276,29 @@ func runNewOrAdopt(root string, cfg Config, adopt bool) error {
 	}
 	printAssessment(cfg.Mode, targetAbs, assessment)
 
-	ops, err := planRender(root, cfg, targetAbs, adopt)
+	canonical, err := planCanonical(root, cfg, targetAbs)
 	if err != nil {
 		return err
 	}
+
+	versionContent, _ := os.ReadFile(filepath.Join(root, "TEMPLATE_VERSION"))
+	templateVersion := strings.TrimSpace(string(versionContent))
+	manifest := buildManifest(canonical, templateVersion, root, targetAbs)
+	manifestOp := operation{
+		kind:    "write",
+		path:    filepath.Join(targetAbs, manifestFileName),
+		content: formatManifest(manifest),
+		note:    "bootstrap manifest",
+	}
+
+	var ops []operation
+	if adopt {
+		ops = compactOperations(applyAdoptTransforms(canonical))
+	} else {
+		ops = compactOperations(canonical)
+	}
+	ops = append(ops, manifestOp)
+
 	if err := applyOperations(ops, cfg.DryRun); err != nil {
 		return err
 	}
@@ -310,6 +340,11 @@ func RunEnhance(root string, cfg Config) error {
 
 	if cfg.DryRun {
 		fmt.Printf("dry-run write %s (enhancement AC doc)\n", acPath)
+		if cfg.Apply {
+			if err := applyProposals(root, selected, deferred, true); err != nil {
+				return err
+			}
+		}
 		fmt.Println("dry-run: no template changes applied")
 		return nil
 	}
@@ -320,7 +355,44 @@ func RunEnhance(root string, cfg Config) error {
 		return fmt.Errorf("write AC doc: %w", err)
 	}
 	fmt.Printf("write %s (enhancement AC doc)\n", acPath)
+	if cfg.Apply {
+		if err := applyProposals(root, selected, deferred, false); err != nil {
+			return err
+		}
+	}
 	fmt.Println("enhance mode is review-first: no template changes applied")
+	return nil
+}
+
+func applyProposals(templateRoot string, selected EnhancementCandidate, deferred []EnhancementCandidate, dryRun bool) error {
+	candidates := []EnhancementCandidate{selected}
+	for _, d := range deferred {
+		if isActionable(d) {
+			candidates = append(candidates, d)
+		}
+	}
+
+	for _, c := range candidates {
+		refContent, err := os.ReadFile(c.Path)
+		if err != nil {
+			return fmt.Errorf("read reference file %s: %w", c.Path, err)
+		}
+
+		targetPath := filepath.Join(templateRoot, c.TemplateTarget)
+		proposal := proposalPath(targetPath)
+
+		if dryRun {
+			fmt.Printf("dry-run propose %s\n", proposal)
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(proposal), 0o755); err != nil {
+			return fmt.Errorf("create directory for proposal: %w", err)
+		}
+		if err := os.WriteFile(proposal, refContent, 0o644); err != nil {
+			return fmt.Errorf("write proposal %s: %w", proposal, err)
+		}
+		fmt.Printf("propose %s\n", proposal)
+	}
 	return nil
 }
 
@@ -448,8 +520,17 @@ func AssessTarget(root string, repoType RepoType) (Assessment, error) {
 }
 
 func ReviewEnhancement(templateRoot, referenceRoot string) (EnhancementReport, error) {
+	manifest, hasManifest, err := readManifest(referenceRoot)
+	if err != nil {
+		return EnhancementReport{}, err
+	}
+	var mmap map[string]ManifestEntry
+	if hasManifest {
+		mmap = manifestEntryMap(manifest)
+	}
+
 	var candidates []EnhancementCandidate
-	if governanceCandidates, err := reviewGovernedSections(templateRoot, referenceRoot); err != nil {
+	if governanceCandidates, err := reviewGovernedSections(templateRoot, referenceRoot, mmap); err != nil {
 		return EnhancementReport{}, err
 	} else {
 		candidates = append(candidates, governanceCandidates...)
@@ -477,7 +558,7 @@ func ReviewEnhancement(templateRoot, referenceRoot string) (EnhancementReport, e
 		{Area: "examples or upgrade path", ReferencePaths: []string{"TEMPLATE_VERSION"}, TemplateTarget: "TEMPLATE_VERSION"},
 	}
 	for _, item := range mappings {
-		candidate, ok, err := reviewMappedFile(templateRoot, referenceRoot, item)
+		candidate, ok, err := reviewMappedFile(templateRoot, referenceRoot, item, mmap)
 		if err != nil {
 			return EnhancementReport{}, err
 		}
@@ -536,6 +617,17 @@ func stackSuggestsGo(stack string) bool {
 }
 
 func planRender(root string, cfg Config, targetRoot string, adopt bool) ([]operation, error) {
+	canonical, err := planCanonical(root, cfg, targetRoot)
+	if err != nil {
+		return nil, err
+	}
+	if !adopt {
+		return compactOperations(canonical), nil
+	}
+	return compactOperations(applyAdoptTransforms(canonical)), nil
+}
+
+func planCanonical(root string, cfg Config, targetRoot string) ([]operation, error) {
 	placeholders := map[string]string{
 		"{{REPO_NAME}}":           cfg.RepoName,
 		"{{PROJECT_PURPOSE}}":     cfg.Purpose,
@@ -553,37 +645,28 @@ func planRender(root string, cfg Config, targetRoot string, adopt bool) ([]opera
 		path:    filepath.Join(targetRoot, "AGENTS.md"),
 		content: agentsContent,
 		note:    "base governance contract",
+		source:  filepath.Join("base", "AGENTS.md"),
 	}}
-
-	if adopt {
-		ops[0] = proposeIfExists(ops[0])
-	}
 
 	versionContent, err := os.ReadFile(filepath.Join(root, "TEMPLATE_VERSION"))
 	if err != nil {
 		return nil, fmt.Errorf("read template version: %w", err)
 	}
-	versionOp := operation{
+	ops = append(ops, operation{
 		kind:    "write",
 		path:    filepath.Join(targetRoot, "TEMPLATE_VERSION"),
 		content: string(versionContent),
 		note:    "template version marker",
-	}
-	if adopt {
-		versionOp = skipIfExists(versionOp)
-	}
-	ops = append(ops, versionOp)
+		source:  "TEMPLATE_VERSION",
+	})
 
-	linkOp := operation{
+	ops = append(ops, operation{
 		kind:   "symlink",
 		path:   filepath.Join(targetRoot, "CLAUDE.md"),
 		linkTo: "AGENTS.md",
 		note:   "agent alias link",
-	}
-	if adopt {
-		linkOp = skipIfExists(linkOp)
-	}
-	ops = append(ops, linkOp)
+		source: filepath.Join("base", "AGENTS.md"),
+	})
 
 	overlayRoot := filepath.Join(root, "overlays", strings.ToLower(string(cfg.Type)), "files")
 	err = filepath.WalkDir(overlayRoot, func(path string, d fs.DirEntry, walkErr error) error {
@@ -609,23 +692,40 @@ func planRender(root string, cfg Config, targetRoot string, adopt bool) ([]opera
 		if err != nil {
 			return err
 		}
-		op := operation{
+		sourceRel, _ := filepath.Rel(root, path)
+		ops = append(ops, operation{
 			kind:    "write",
 			path:    filepath.Join(targetRoot, targetRel),
 			content: content,
 			note:    "overlay file",
-		}
-		if adopt {
-			op = proposeIfExists(op)
-		}
-		ops = append(ops, op)
+			source:  sourceRel,
+		})
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("walk overlay templates: %w", err)
 	}
 
-	return compactOperations(ops), nil
+	return ops, nil
+}
+
+func applyAdoptTransforms(ops []operation) []operation {
+	out := make([]operation, len(ops))
+	for i, op := range ops {
+		switch {
+		case op.kind == "write" && op.note == "base governance contract":
+			out[i] = proposeIfExists(op)
+		case op.kind == "write" && op.note == "template version marker":
+			out[i] = skipIfExists(op)
+		case op.kind == "symlink":
+			out[i] = skipIfExists(op)
+		case op.kind == "write" && op.note == "overlay file":
+			out[i] = proposeIfExists(op)
+		default:
+			out[i] = op
+		}
+	}
+	return out
 }
 
 func compactOperations(ops []operation) []operation {
@@ -735,23 +835,34 @@ func printEnhancementSummary(report EnhancementReport) {
 	fmt.Printf("candidates: %d (accept=%d adapt=%d defer=%d reject=%d)\n",
 		len(report.Candidates), counts["accept"], counts["adapt"], counts["defer"], counts["reject"])
 	for _, c := range report.Candidates {
-		fmt.Printf("- area=%s path=%s disposition=%s portability=%s", c.Area, displayReferencePath(report.ReferenceRoot, c.Path), c.Disposition, c.Portability)
-		if c.Section != "" {
-			fmt.Printf(" section=%s", c.Section)
-		}
-		if c.TemplateTarget != "" {
-			fmt.Printf(" template-target=%s", c.TemplateTarget)
-		}
-		fmt.Printf(" collision-impact=%s", c.CollisionImpact)
-		fmt.Printf(" reason=%s", c.Reason)
-		if c.Summary != "" {
-			fmt.Printf(" summary=%s", c.Summary)
-		}
-		fmt.Println()
+		fmt.Println(formatCandidateLine(c, report.ReferenceRoot))
 	}
 }
 
-func reviewGovernedSections(templateRoot, referenceRoot string) ([]EnhancementCandidate, error) {
+func formatCandidateLine(c EnhancementCandidate, referenceRoot string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "- area=%s path=%s disposition=%s portability=%s", c.Area, displayReferencePath(referenceRoot, c.Path), c.Disposition, c.Portability)
+	if c.Section != "" {
+		fmt.Fprintf(&b, " section=%s", c.Section)
+	}
+	if c.TemplateTarget != "" {
+		fmt.Fprintf(&b, " template-target=%s", c.TemplateTarget)
+	}
+	if len(c.DeltaSections) > 0 {
+		fmt.Fprintf(&b, " delta-sections=%s", strings.Join(c.DeltaSections, ","))
+	}
+	if c.ChangeOrigin != "" {
+		fmt.Fprintf(&b, " change-origin=%s", c.ChangeOrigin)
+	}
+	fmt.Fprintf(&b, " collision-impact=%s", c.CollisionImpact)
+	fmt.Fprintf(&b, " reason=%s", c.Reason)
+	if c.Summary != "" {
+		fmt.Fprintf(&b, " summary=%s", c.Summary)
+	}
+	return b.String()
+}
+
+func reviewGovernedSections(templateRoot, referenceRoot string, mmap map[string]ManifestEntry) ([]EnhancementCandidate, error) {
 	refPath := filepath.Join(referenceRoot, "AGENTS.md")
 	refInfo, err := os.Stat(refPath)
 	if err != nil || refInfo.IsDir() {
@@ -766,6 +877,31 @@ func reviewGovernedSections(templateRoot, referenceRoot string) ([]EnhancementCa
 	refContent, err := os.ReadFile(refPath)
 	if err != nil {
 		return nil, fmt.Errorf("read reference governance file %s: %w", refPath, err)
+	}
+
+	// Three-way pre-filter using manifest
+	var sectionOrigin string
+	if mmap != nil {
+		if entry, ok := mmap["AGENTS.md"]; ok && entry.Kind == "file" {
+			userChanged := computeChecksum(string(refContent)) != entry.Checksum
+			templateChanged := false
+			if entry.SourcePath != "" && entry.SourceChecksum != "" {
+				sourceContent, readErr := os.ReadFile(filepath.Join(templateRoot, entry.SourcePath))
+				if readErr == nil {
+					templateChanged = computeChecksum(string(sourceContent)) != entry.SourceChecksum
+				}
+			}
+			switch {
+			case !userChanged && !templateChanged:
+				return nil, nil
+			case !userChanged && templateChanged:
+				return nil, nil
+			case userChanged && !templateChanged:
+				sectionOrigin = "user"
+			case userChanged && templateChanged:
+				sectionOrigin = "both"
+			}
+		}
 	}
 
 	templateSections := sectionMap(parseLevel2Sections(string(templateContent)))
@@ -802,12 +938,13 @@ func reviewGovernedSections(templateRoot, referenceRoot string) ([]EnhancementCa
 			TemplateTarget:  filepath.Join("base", "AGENTS.md"),
 			Summary:         summarizeSectionDelta(section, refBody),
 			CollisionImpact: "medium",
+			ChangeOrigin:    sectionOrigin,
 		})
 	}
 	return candidates, nil
 }
 
-func reviewMappedFile(templateRoot, referenceRoot string, item enhancementMapping) (EnhancementCandidate, bool, error) {
+func reviewMappedFile(templateRoot, referenceRoot string, item enhancementMapping, mmap map[string]ManifestEntry) (EnhancementCandidate, bool, error) {
 	refPath, ok := firstExistingPath(referenceRoot, item.ReferencePaths)
 	if !ok {
 		return EnhancementCandidate{}, false, nil
@@ -828,10 +965,48 @@ func reviewMappedFile(templateRoot, referenceRoot string, item enhancementMappin
 		return EnhancementCandidate{}, false, nil
 	}
 
+	// Three-way comparison using manifest
+	var changeOrigin string
+	if mmap != nil {
+		refRel, _ := filepath.Rel(referenceRoot, refPath)
+		refRelSlash := filepath.ToSlash(refRel)
+		if entry, ok := mmap[refRelSlash]; ok && entry.Kind == "file" {
+			userChanged := computeChecksum(string(refContent)) != entry.Checksum
+			templateChanged := false
+			if entry.SourcePath != "" && entry.SourceChecksum != "" {
+				sourceContent, readErr := os.ReadFile(filepath.Join(templateRoot, entry.SourcePath))
+				if readErr == nil {
+					templateChanged = computeChecksum(string(sourceContent)) != entry.SourceChecksum
+				}
+			}
+			switch {
+			case !userChanged && !templateChanged:
+				return EnhancementCandidate{}, false, nil
+			case !userChanged && templateChanged:
+				changeOrigin = "template"
+			case userChanged && !templateChanged:
+				changeOrigin = "user"
+			case userChanged && templateChanged:
+				changeOrigin = "both"
+			}
+		}
+	}
+
 	portability, disposition, reason := classifyEnhancement(string(refContent), referenceRoot, item.TemplateTarget, false)
 	collisionImpact := "low"
 	if targetExists {
 		collisionImpact = "medium"
+	}
+
+	if changeOrigin == "template" {
+		disposition = "defer"
+		reason = "reference file is stale; template has already evolved past the bootstrap baseline"
+		portability = "needs-review"
+	}
+
+	var deltaSections []string
+	if targetExists {
+		deltaSections = diffMarkdownSections(string(targetContent), string(refContent))
 	}
 
 	return EnhancementCandidate{
@@ -843,6 +1018,8 @@ func reviewMappedFile(templateRoot, referenceRoot string, item enhancementMappin
 		TemplateTarget:  item.TemplateTarget,
 		Summary:         summarizeFileContent(refPath, string(refContent)),
 		CollisionImpact: collisionImpact,
+		DeltaSections:   deltaSections,
+		ChangeOrigin:    changeOrigin,
 	}, true, nil
 }
 
@@ -912,7 +1089,7 @@ func governanceSectionCovered(section, templateBody, referenceBody string) bool 
 			return false
 		}
 	}
-	return true
+	return constraintsCovered(templateBody, referenceBody)
 }
 
 func normalizeText(value string) string {
@@ -923,39 +1100,61 @@ func normalizeText(value string) string {
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
+type signalDef struct {
+	Name  string
+	Match func(text string) bool
+}
+
+var defaultSignalDefs = map[string][]signalDef{
+	"Interaction Mode": {
+		{"exploratory-discussion-default", func(t string) bool { return containsAll(t, "exploratory", "discussion") }},
+		{"changes-need-authorization", func(t string) bool {
+			return (containsAll(t, "create", "artifacts") || containsAll(t, "make", "changes")) && containsAny(t, "authoriz", "authoris")
+		}},
+		{"minimal-change-on-authorization", func(t string) bool {
+			return containsAll(t, "smallest", "change") || containsAll(t, "minimal", "change")
+		}},
+		{"surface-assumptions", func(t string) bool { return containsAny(t, "assumptions", "ambiguities", "missing context") }},
+	},
+	"Approval Boundaries": {
+		{"destructive-needs-approval", func(t string) bool { return containsAny(t, "destructive") }},
+		{"release-needs-approval", func(t string) bool { return containsAny(t, "release", "publish", "deploy") }},
+		{"governance-needs-approval", func(t string) bool {
+			return containsAny(t, "governance files", "ci", "secrets", "external integrations")
+		}},
+	},
+	"Review Style": {
+		{"review-findings-first", func(t string) bool { return containsAll(t, "findings", "before") }},
+		{"review-bugs-regressions", func(t string) bool { return containsAny(t, "bugs", "regressions", "missing tests") }},
+		{"review-evidence", func(t string) bool { return containsAny(t, "concrete evidence", "file paths", "coverage") }},
+	},
+	"File-Change Discipline": {
+		{"targeted-edits", func(t string) bool { return containsAny(t, "targeted edits", "broad rewrites") }},
+		{"preserve-user-changes", func(t string) bool { return containsAny(t, "preserve user changes", "unrelated local modifications") }},
+		{"docs-in-same-pass", func(t string) bool { return containsAny(t, "directly affected docs", "self-contained") }},
+	},
+	"Release Or Publish Triggers": {
+		{"release-only-on-request", func(t string) bool {
+			return containsAny(t, "explicitly asks", "explicitly asks for it", "release-scoped")
+		}},
+		{"release-artifacts-same-pass", func(t string) bool { return containsAny(t, "required release artifacts", "same pass") }},
+	},
+	"Documentation Update Expectations": {
+		{"docs-align-with-behavior", func(t string) bool { return containsAny(t, "aligned with behavior", "drift") }},
+		{"update-user-facing-docs", func(t string) bool {
+			return containsAny(t, "user-facing docs", "operating instructions", "setup", "workflows")
+		}},
+		{"update-arch-plan-style-when-material", func(t string) bool { return containsAny(t, "architecture", "planning", "style docs") }},
+	},
+}
+
 func sectionSignals(section, body string) map[string]bool {
 	text := normalizedSignalText(body)
 	signals := map[string]bool{}
-	addSignal := func(name string, ok bool) {
-		if ok {
-			signals[name] = true
+	for _, def := range defaultSignalDefs[section] {
+		if def.Match(text) {
+			signals[def.Name] = true
 		}
-	}
-	switch section {
-	case "Interaction Mode":
-		addSignal("exploratory-discussion-default", containsAll(text, "exploratory", "discussion"))
-		addSignal("changes-need-authorization", (containsAll(text, "create", "artifacts") || containsAll(text, "make", "changes")) && containsAny(text, "authoriz", "authoris"))
-		addSignal("minimal-change-on-authorization", containsAll(text, "smallest", "change") || containsAll(text, "minimal", "change"))
-		addSignal("surface-assumptions", containsAny(text, "assumptions", "ambiguities", "missing context"))
-	case "Approval Boundaries":
-		addSignal("destructive-needs-approval", containsAny(text, "destructive"))
-		addSignal("release-needs-approval", containsAny(text, "release", "publish", "deploy"))
-		addSignal("governance-needs-approval", containsAny(text, "governance files", "ci", "secrets", "external integrations"))
-	case "Review Style":
-		addSignal("review-findings-first", containsAll(text, "findings", "before"))
-		addSignal("review-bugs-regressions", containsAny(text, "bugs", "regressions", "missing tests"))
-		addSignal("review-evidence", containsAny(text, "concrete evidence", "file paths", "coverage"))
-	case "File-Change Discipline":
-		addSignal("targeted-edits", containsAny(text, "targeted edits", "broad rewrites"))
-		addSignal("preserve-user-changes", containsAny(text, "preserve user changes", "unrelated local modifications"))
-		addSignal("docs-in-same-pass", containsAny(text, "directly affected docs", "self-contained"))
-	case "Release Or Publish Triggers":
-		addSignal("release-only-on-request", containsAny(text, "explicitly asks", "explicitly asks for it", "release-scoped"))
-		addSignal("release-artifacts-same-pass", containsAny(text, "required release artifacts", "same pass"))
-	case "Documentation Update Expectations":
-		addSignal("docs-align-with-behavior", containsAny(text, "aligned with behavior", "drift"))
-		addSignal("update-user-facing-docs", containsAny(text, "user-facing docs", "operating instructions", "setup", "workflows"))
-		addSignal("update-arch-plan-style-when-material", containsAny(text, "architecture", "planning", "style docs"))
 	}
 	return signals
 }
@@ -995,28 +1194,203 @@ func containsAny(text string, parts ...string) bool {
 	return false
 }
 
+func diffMarkdownSections(templateContent, referenceContent string) []string {
+	templateSections := parseLevel2Sections(templateContent)
+	referenceSections := parseLevel2Sections(referenceContent)
+
+	if len(templateSections) == 0 || len(referenceSections) == 0 {
+		return nil
+	}
+
+	templateMap := sectionMap(templateSections)
+	referenceMap := sectionMap(referenceSections)
+	seen := map[string]bool{}
+	var deltas []string
+
+	for _, rs := range referenceSections {
+		seen[rs.Name] = true
+		tb, ok := templateMap[rs.Name]
+		if !ok {
+			deltas = append(deltas, rs.Name)
+			continue
+		}
+		if !normalizedEqual(tb, rs.Body) {
+			deltas = append(deltas, rs.Name)
+		}
+	}
+
+	for _, ts := range templateSections {
+		if seen[ts.Name] {
+			continue
+		}
+		if _, ok := referenceMap[ts.Name]; !ok {
+			deltas = append(deltas, ts.Name)
+		}
+	}
+
+	return deltas
+}
+
+func extractConstraints(body string) []string {
+	lines := strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
+	var constraints []string
+	var current strings.Builder
+
+	flush := func() {
+		text := strings.TrimSpace(current.String())
+		if text != "" {
+			constraints = append(constraints, normalizedSignalText(text))
+		}
+		current.Reset()
+	}
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if text, ok := stripListPrefix(trimmed); ok {
+			flush()
+			current.WriteString(text)
+		} else {
+			if current.Len() > 0 {
+				current.WriteString(" ")
+			}
+			current.WriteString(trimmed)
+		}
+	}
+	flush()
+	return constraints
+}
+
+func stripListPrefix(line string) (string, bool) {
+	if strings.HasPrefix(line, "- ") {
+		return line[2:], true
+	}
+	if strings.HasPrefix(line, "* ") {
+		return line[2:], true
+	}
+	for i, ch := range line {
+		if ch >= '0' && ch <= '9' {
+			continue
+		}
+		if ch == '.' && i > 0 && i+1 < len(line) && line[i+1] == ' ' {
+			return line[i+2:], true
+		}
+		break
+	}
+	return "", false
+}
+
+func constraintsCovered(templateBody, referenceBody string) bool {
+	templateConstraints := extractConstraints(templateBody)
+	referenceConstraints := extractConstraints(referenceBody)
+
+	if len(referenceConstraints) == 0 {
+		return true
+	}
+
+	for _, rc := range referenceConstraints {
+		if !slices.Contains(templateConstraints, rc) {
+			return false
+		}
+	}
+	return true
+}
+
+type classificationContext struct {
+	Content        string
+	ReferenceRoot  string
+	TemplateTarget string
+	Governance     bool
+}
+
+type classificationRule struct {
+	Name        string
+	Priority    int // lower wins; first matching rule by priority applies
+	Match       func(ctx classificationContext) bool
+	Portability string
+	Disposition string
+	Reason      string
+}
+
+type markerRule struct {
+	Name  string
+	Match func(content, referenceRoot string) bool
+}
+
+var defaultMarkerRules = []markerRule{
+	{"mentions reference repo name", func(content, refRoot string) bool {
+		lower := strings.ToLower(content)
+		refName := strings.ToLower(filepath.Base(refRoot))
+		return refName != "" && strings.Contains(lower, refName)
+	}},
+	{"contains absolute user path", func(content, _ string) bool {
+		return strings.Contains(content, "/Users/") || strings.Contains(content, "\\Users\\")
+	}},
+}
+
+var defaultClassificationRules = []classificationRule{
+	{
+		Name:     "project-specific",
+		Priority: 100,
+		Match: func(ctx classificationContext) bool {
+			return len(projectSpecificMarkers(ctx.Content, ctx.ReferenceRoot)) > 0
+		},
+		Portability: "project-specific", Disposition: "defer",
+		Reason: "content appears tied to the reference repo and should not be imported directly",
+	},
+	{
+		Name:        "governance",
+		Priority:    200,
+		Match:       func(ctx classificationContext) bool { return ctx.Governance },
+		Portability: "portable", Disposition: "accept",
+		Reason: "section-level governance delta is reusable enough to review directly against the base contract",
+	},
+	{
+		Name:     "workflow-helper",
+		Priority: 300,
+		Match: func(ctx classificationContext) bool {
+			return strings.HasSuffix(ctx.TemplateTarget, ".go.tmpl") || strings.HasSuffix(ctx.TemplateTarget, ".sh.tmpl") || ctx.TemplateTarget == "TEMPLATE_VERSION"
+		},
+		Portability: "portable", Disposition: "accept",
+		Reason: "workflow helper or release artifact is concrete and portable enough for direct template review",
+	},
+	{
+		Name:        "default",
+		Priority:    9999,
+		Match:       func(_ classificationContext) bool { return true },
+		Portability: "needs-review", Disposition: "adapt",
+		Reason: "artifact may contain reusable structure, but the content should be adapted before it becomes template baseline",
+	},
+}
+
 func classifyEnhancement(content, referenceRoot, templateTarget string, governance bool) (string, string, string) {
-	if markers := projectSpecificMarkers(content, referenceRoot); len(markers) > 0 {
-		return "project-specific", "defer", "content appears tied to the reference repo and should not be imported directly"
+	ctx := classificationContext{
+		Content:        content,
+		ReferenceRoot:  referenceRoot,
+		TemplateTarget: templateTarget,
+		Governance:     governance,
 	}
-	if governance {
-		return "portable", "accept", "section-level governance delta is reusable enough to review directly against the base contract"
+	sorted := make([]classificationRule, len(defaultClassificationRules))
+	copy(sorted, defaultClassificationRules)
+	slices.SortStableFunc(sorted, func(a, b classificationRule) int {
+		return cmp.Compare(a.Priority, b.Priority)
+	})
+	for _, rule := range sorted {
+		if rule.Match(ctx) {
+			return rule.Portability, rule.Disposition, rule.Reason
+		}
 	}
-	if strings.HasSuffix(templateTarget, ".go.tmpl") || strings.HasSuffix(templateTarget, ".sh.tmpl") || templateTarget == "TEMPLATE_VERSION" {
-		return "portable", "accept", "workflow helper or release artifact is concrete and portable enough for direct template review"
-	}
-	return "needs-review", "adapt", "artifact may contain reusable structure, but the content should be adapted before it becomes template baseline"
+	return "needs-review", "adapt", "no classification rule matched"
 }
 
 func projectSpecificMarkers(content, referenceRoot string) []string {
-	lower := strings.ToLower(content)
-	refName := strings.ToLower(filepath.Base(referenceRoot))
 	var markers []string
-	if refName != "" && strings.Contains(lower, refName) {
-		markers = append(markers, "mentions reference repo name")
-	}
-	if strings.Contains(content, "/Users/") || strings.Contains(content, "\\Users\\") {
-		markers = append(markers, "contains absolute user path")
+	for _, rule := range defaultMarkerRules {
+		if rule.Match(content, referenceRoot) {
+			markers = append(markers, rule.Name)
+		}
 	}
 	return markers
 }
@@ -1208,12 +1582,19 @@ func renderACDoc(selected EnhancementCandidate, deferred []EnhancementCandidate,
 	if selected.Summary != "" {
 		fmt.Fprintf(&b, "Evidence: %s\n\n", selected.Summary)
 	}
+	if len(selected.DeltaSections) > 0 {
+		fmt.Fprintf(&b, "Changed sections: %s\n\n", strings.Join(selected.DeltaSections, ", "))
+	}
 
 	b.WriteString("## In Scope\n\n")
 	if selected.TemplateTarget != "" {
 		fmt.Fprintf(&b, "- Review and update `%s`\n", selected.TemplateTarget)
 	}
-	if selected.Section != "" {
+	if len(selected.DeltaSections) > 0 {
+		for _, ds := range selected.DeltaSections {
+			fmt.Fprintf(&b, "- Section: `%s`\n", ds)
+		}
+	} else if selected.Section != "" {
 		fmt.Fprintf(&b, "- Section: `%s`\n", selected.Section)
 	}
 	fmt.Fprintf(&b, "- Area: %s\n", selected.Area)
@@ -1225,7 +1606,11 @@ func renderACDoc(selected EnhancementCandidate, deferred []EnhancementCandidate,
 
 	b.WriteString("## Implementation Notes\n\n")
 	fmt.Fprintf(&b, "- Source: `%s`\n", displayReferencePath(report.ReferenceRoot, selected.Path))
-	fmt.Fprintf(&b, "- Collision impact: `%s`\n\n", selected.CollisionImpact)
+	fmt.Fprintf(&b, "- Collision impact: `%s`\n", selected.CollisionImpact)
+	if selected.ChangeOrigin != "" {
+		fmt.Fprintf(&b, "- Change origin: `%s`\n", selected.ChangeOrigin)
+	}
+	b.WriteString("\n")
 
 	b.WriteString("## Acceptance Tests\n\n")
 	b.WriteString("- [Manual] Verify the template target reflects the enhancement\n")

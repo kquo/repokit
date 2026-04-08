@@ -84,10 +84,12 @@ Behavior:
 - extract candidate improvements in governance, overlays, workflow, or bootstrap behavior
 - compare those candidates against this template's current files
 - create an AC doc for the highest-priority actionable candidate, if any
+- with `--apply`, write `.template-proposed` files alongside template targets for actionable candidates (never overwrites live files)
 - patch this template repo only after explicit approval
 
 `enhance` is not a blind sync operation.
 It is a review-driven, AC-first proposal flow for template maintainers.
+The `--apply` flag adds proposal files to assist the merge step, but the AC doc is always created first and proposals are always side-by-side artifacts requiring manual review.
 
 ## Implementation Constraints
 
@@ -144,6 +146,7 @@ Recommended initial ownership model:
   - `AGENTS.md`
   - `CLAUDE.md` symlink
   - `TEMPLATE_VERSION`
+  - `.repokit-manifest`
 - overlay-owned by default when newly created:
   - `README.md`
   - `arch.md`
@@ -286,15 +289,27 @@ Rules:
 The current enhance workflow:
 
 1. inspect reference repo
-2. extract candidate deltas
-3. compare `AGENTS.md` by named governed sections
-4. compare overlay and workflow artifacts by deterministic file mapping
-5. classify each delta as portable, needs-review, or project-specific
-6. recommend accept, adapt, defer, or reject
-7. create an AC doc under `docs/` for the highest-priority actionable candidate, if any
-8. only then patch this template repo after AC approval
+2. read `.repokit-manifest` from reference if present (enables three-way comparison)
+3. extract candidate deltas
+4. compare `AGENTS.md` by named governed sections using constraint-level comparison (each bullet is a distinct constraint; signal matching acts as a fast pre-filter, then normalized constraint sets are compared so two sections with the same keywords but different rules still produce a candidate)
+5. compare overlay and workflow artifacts by deterministic file mapping with section-level diffing (structured markdown files with `##` headings are compared per-section; the candidate reports which specific sections changed rather than flagging the whole file; unstructured files fall back to whole-file comparison)
+6. when manifest is available, classify each difference by origin: `user` (reference changed, template did not — potential improvement to adopt), `template` (template evolved, reference is stale — defer), `both` (both changed — needs careful review), or empty (no manifest, two-way fallback)
+7. classify each delta using a data-driven rule table (project-specific markers, governance, workflow helpers, default fallback); rules are declarative Go structs — adding a new classification is a table entry, not a code branch
+8. recommend accept, adapt, defer, or reject
+9. create an AC doc under `docs/` for the highest-priority actionable candidate, if any
+10. only then patch this template repo after AC approval
 
 The current implementation stops at the review stage and, when actionable improvements are found, creates an AC doc under `docs/` for the highest-priority candidate. It does not auto-apply enhancements.
+
+### Bootstrap Manifest
+
+During `new` and `adopt` bootstrap, repokit writes a `.repokit-manifest` file into the generated repo. This file records:
+
+- the template version used at bootstrap time
+- SHA-256 checksums of each generated file (after placeholder substitution)
+- the source template path and checksum for each file
+
+The manifest enables three-way comparison during enhance: by comparing the current reference file against its bootstrap-time checksum, and the current template source against its bootstrap-time checksum, enhance can determine whether a difference came from user customization, template evolution, or both. Repos bootstrapped before this feature have no manifest and fall back to the original two-way comparison.
 
 ## Why This Fits The Template Repo
 
