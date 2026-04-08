@@ -153,8 +153,8 @@ Recommended initial ownership model:
   - `README.md`
   - `arch.md`
   - `plan.md`
-  - `style.md` or `voice.md`
-  - `content-plan.md` or `calendar.md`
+  - `style.md` (`voice.md` planned)
+  - `content-plan.md` (`calendar.md` planned)
   - `docs/agent-roles/` (DEV, QA, and custom role docs)
 - user-owned unless explicitly mapped:
   - source code
@@ -185,7 +185,8 @@ bootstrap \
   [-v, --style "<voice/style>"] \
   [-r, --reference <reference-root>] \
   [-g, --init-git] \
-  [-d, --dry-run]
+  [-d, --dry-run] \
+  [-a, --apply]
 ```
 
 The agent may gather these interactively, but the script itself should accept explicit inputs so runs are reproducible.
@@ -194,7 +195,7 @@ If `target` is omitted for `new` or `adopt`, the command should default to the c
 Mode-specific expectations:
 
 - `new`: requires `type`, `repo-name`, `purpose`, plus overlay-specific metadata
-- `adopt`: requires `type` unless inferred confidently, `repo-name`, and `purpose`
+- `adopt`: requires `type` unless inferred confidently, `repo-name`, and `purpose`; when type is specified, overlay-specific metadata also becomes required (`stack` for CODE, `publishing-platform` and `style` for DOC)
 - `enhance`: requires `reference` and should normally run with this template repo as the current working tree
 
 The implementation lives in `cmd/bootstrap/`, invoked via `go run <template-root>/cmd/bootstrap`.

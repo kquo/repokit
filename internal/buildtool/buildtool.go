@@ -89,8 +89,10 @@ func Run(cfg Config, out io.Writer, errOut io.Writer) error {
 		fmt.Fprintln(out, "    No formatting changes needed.")
 	} else {
 		writeIndented(out, output)
+		return fmt.Errorf("go fmt found files that need formatting")
 	}
 
+	// go fix is advisory — it reports rewrites but does not indicate errors that should block the build.
 	fmt.Fprintln(out, "\n"+color.Yel("==> Automatically fix code for API/language changes"))
 	if output := runCapturedSoft("go", append([]string{"fix"}, scopes...)...); strings.TrimSpace(output) == "" {
 		fmt.Fprintln(out, "    No fixes applied.")

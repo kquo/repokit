@@ -85,7 +85,7 @@ Before offering a release commit or release command:
 5. confirm `TEMPLATE_VERSION` matches the intended template release version
 6. remove or reprioritize completed roadmap items in `plan.md`
 7. consolidate finished AC decisions into durable docs and close or remove completed AC files if the repo uses AC docs
-8. prepare the exact tag and release message — the release message should be a single concise line, ideally 60 characters or fewer
+8. prepare the exact tag and release message — the release message must be a single concise line, 60 characters or fewer
 9. present the canonical release command for the user to run or approve
 
 ## Release Artifacts

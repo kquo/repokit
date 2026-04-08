@@ -1,6 +1,7 @@
 package reltool
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -204,6 +205,81 @@ func TestIsHelpArgValues(t *testing.T) {
 		if IsHelpArg(arg) {
 			t.Fatalf("did not expect %q to be help arg", arg)
 		}
+	}
+}
+
+func TestEnsureGitRepoOutsideRepo(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	err := ensureGitRepoIn(dir)
+	if err == nil {
+		t.Fatal("expected error outside git repo")
+	}
+	if !strings.Contains(err.Error(), "verify git repo") {
+		t.Fatalf("error should mention git repo verification, got: %v", err)
+	}
+}
+
+func TestRecoveryErrorWithTagCreated(t *testing.T) {
+	t.Parallel()
+	err := recoveryError(
+		errors.New("exit status 128"),
+		"git push tag",
+		"v1.2.3",
+		[]string{"git add", "git commit", "git tag"},
+	)
+	msg := err.Error()
+	if !strings.Contains(msg, "git push tag failed") {
+		t.Fatalf("should name the failed step, got: %s", msg)
+	}
+	if !strings.Contains(msg, "completed before failure") {
+		t.Fatalf("should list completed steps, got: %s", msg)
+	}
+	if !strings.Contains(msg, "tag v1.2.3 exists locally") {
+		t.Fatalf("should mention orphaned tag, got: %s", msg)
+	}
+	if !strings.Contains(msg, "git push origin v1.2.3") {
+		t.Fatalf("should suggest retry push, got: %s", msg)
+	}
+	if !strings.Contains(msg, "git tag -d v1.2.3") {
+		t.Fatalf("should suggest tag deletion, got: %s", msg)
+	}
+}
+
+func TestRecoveryErrorNoCompletedSteps(t *testing.T) {
+	t.Parallel()
+	err := recoveryError(
+		errors.New("exit status 1"),
+		"git add",
+		"v1.0.0",
+		nil,
+	)
+	msg := err.Error()
+	if !strings.Contains(msg, "git add failed") {
+		t.Fatalf("should name the failed step, got: %s", msg)
+	}
+	if strings.Contains(msg, "completed before failure") {
+		t.Fatalf("should not mention completed steps when none, got: %s", msg)
+	}
+}
+
+func TestRecoveryErrorBranchPushFailsAfterTagPush(t *testing.T) {
+	t.Parallel()
+	err := recoveryError(
+		errors.New("exit status 128"),
+		"git push branch",
+		"v1.2.3",
+		[]string{"git add", "git commit", "git tag", "git push tag"},
+	)
+	msg := err.Error()
+	if !strings.Contains(msg, "branch push failed") {
+		t.Fatalf("should mention branch push, got: %s", msg)
+	}
+	if !strings.Contains(msg, "git push origin") {
+		t.Fatalf("should suggest retry branch push, got: %s", msg)
+	}
+	if strings.Contains(msg, "git tag -d") {
+		t.Fatalf("should not suggest deleting tag when tag was already pushed, got: %s", msg)
 	}
 }
 

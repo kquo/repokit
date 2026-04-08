@@ -103,16 +103,52 @@ func Run(cfg Config, in io.Reader, out io.Writer, errOut io.Writer) error {
 		{name: "git push tag", args: []string{"push", "origin", cfg.Tag}},
 		{name: "git push branch", args: []string{"push", "origin"}},
 	}
+	var completed []string
 	for _, step := range steps {
 		if err := runGit(out, errOut, step.name, step.args...); err != nil {
-			return err
+			return recoveryError(err, step.name, cfg.Tag, completed)
 		}
+		completed = append(completed, step.name)
 	}
 	return nil
 }
 
+func recoveryError(err error, failedStep, tag string, completed []string) error {
+	msg := fmt.Sprintf("%s failed: %v", failedStep, err)
+	if len(completed) == 0 {
+		return errors.New(msg)
+	}
+	msg += fmt.Sprintf("\n\ncompleted before failure: %s", strings.Join(completed, ", "))
+	tagCreated := false
+	tagPushed := false
+	for _, c := range completed {
+		if c == "git tag" {
+			tagCreated = true
+		}
+		if c == "git push tag" {
+			tagPushed = true
+		}
+	}
+	if tagCreated && !tagPushed {
+		msg += fmt.Sprintf("\n\nrecovery: tag %s exists locally but was not pushed", tag)
+		msg += fmt.Sprintf("\n  to retry push: git push origin %s && git push origin", tag)
+		msg += fmt.Sprintf("\n  to remove tag: git tag -d %s", tag)
+	} else if tagPushed {
+		msg += fmt.Sprintf("\n\nrecovery: tag %s was pushed but the branch push failed", tag)
+		msg += "\n  to retry: git push origin"
+	}
+	return errors.New(msg)
+}
+
 func ensureGitRepo() error {
+	return ensureGitRepoIn("")
+}
+
+func ensureGitRepoIn(dir string) error {
 	cmd := exec.Command("git", "rev-parse", "--is-inside-work-tree")
+	if dir != "" {
+		cmd.Dir = dir
+	}
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("verify git repo: %w: %s", err, strings.TrimSpace(string(output)))

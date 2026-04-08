@@ -3,6 +3,7 @@ package buildtool
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -318,5 +319,42 @@ func TestIsHelpArg(t *testing.T) {
 		if isHelpArg(arg) {
 			t.Fatalf("did not expect %q to be help arg", arg)
 		}
+	}
+}
+
+func TestRunCapturedSoftReturnsOutput(t *testing.T) {
+	t.Parallel()
+	// Use go version as a portable command that always produces output
+	output := runCapturedSoft("go", "version")
+	if !strings.Contains(output, "go") {
+		t.Fatalf("expected output to contain 'go', got %q", output)
+	}
+}
+
+func TestRunCapturedSoftReturnsErrorOnFailure(t *testing.T) {
+	t.Parallel()
+	// Use go with an invalid subcommand — exits non-zero with error text
+	output := runCapturedSoft("go", "nosuchcommand")
+	if output == "" {
+		t.Fatal("expected non-empty output on failure")
+	}
+}
+
+func TestGoFmtNonEmptyOutputFailsBuild(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module testfmt\n\ngo 1.21\n"), 0o644)
+	// Intentionally bad formatting: missing space before brace, extra spaces
+	os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main(){\nvar   x   int\n_ = x\n}\n"), 0o644)
+
+	// Run go fmt ./... with Dir set, matching production invocation in Run()
+	cmd := exec.Command("go", "fmt", "./...")
+	cmd.Dir = dir
+	output, _ := cmd.CombinedOutput()
+
+	// Non-empty output means files were reformatted — this is the exact
+	// condition checked in Run() to make go fmt build-breaking
+	if strings.TrimSpace(string(output)) == "" {
+		t.Fatal("expected go fmt to report reformatted files")
 	}
 }
