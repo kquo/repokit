@@ -16,6 +16,8 @@ Current contents:
 - `docs/development-cycle.md`
 - `docs/ac-template.md`
 - `docs/build-release.md`
+- `docs/development-guidelines.md`
+- `docs/knowledge/README.md`
 - `cmd/rel/main.go` for Go-based repos only
 - `cmd/rel/color.go` for Go-based repos only
 
