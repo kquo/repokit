@@ -20,7 +20,7 @@ Every new roadmap item should answer:
 
 ## Priorities
 
-- active work items only; remove when shipped
+- Explore non-git target support: bootstrap into directories that are not git repos, for security/privacy use cases where git may be added later or never
 
 ## Deferred
 
