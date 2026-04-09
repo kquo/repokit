@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strconv"
@@ -34,6 +35,9 @@ var scriptOnlyCommands = map[string]struct{}{
 	"bootstrap": {},
 	"rel":       {},
 }
+
+var programVersionInlineRe = regexp.MustCompile(`(?m)^\s*const\s+programVersion\s*(?:string\s*)?=\s*"([^"]*)"`)
+var programVersionBlockRe = regexp.MustCompile(`(?s)const\s*\(.*?programVersion\s*(?:string\s*)?=\s*"([^"]*)".*?\)`)
 
 func main() {
 	cfg, help, err := parseBuildArgs(os.Args[1:])
@@ -175,6 +179,12 @@ func runBuild(cfg buildConfig) error {
 	if shouldSkipBinaryInstall(cfg.targets) {
 		fmt.Printf("    %s %s\n", yel("Skipping binary install for"), cya(joinScriptOnlyTargets(cfg.targets)+"; run them with go run for now."))
 	}
+	if len(targets) > 0 {
+		fmt.Println("\n" + yel("==> Validate programVersion declarations"))
+		if err := validateProgramVersions(targets); err != nil {
+			return err
+		}
+	}
 	for _, target := range targets {
 		outputPath := filepath.Join(binDir, target+ext)
 		fmt.Printf("\n%s %s\n", yel("==> Building and installing"), grn(target))
@@ -286,6 +296,35 @@ func joinScriptOnlyTargets(requested []string) string {
 	}
 	slices.Sort(names)
 	return strings.Join(names, ", ")
+}
+
+func extractProgramVersion(path string) (string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	if match := programVersionInlineRe.FindSubmatch(content); match != nil {
+		return string(match[1]), nil
+	}
+	if match := programVersionBlockRe.FindSubmatch(content); match != nil {
+		return string(match[1]), nil
+	}
+	return "", nil
+}
+
+func validateProgramVersions(targets []string) error {
+	for _, target := range targets {
+		mainPath := filepath.Join("cmd", target, "main.go")
+		ver, err := extractProgramVersion(mainPath)
+		if err != nil {
+			return err
+		}
+		if ver == "" {
+			return fmt.Errorf("cmd/%s/main.go must declare a non-empty const programVersion string literal", target)
+		}
+		fmt.Printf("    %s: programVersion = %s\n", cya("cmd/"+target), grn(fmt.Sprintf("%q", ver)))
+	}
+	return nil
 }
 
 func ensureStaticcheck() (string, error) {

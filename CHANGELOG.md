@@ -3,6 +3,7 @@
 | Version | Summary |
 |---------|---------|
 | Unreleased | |
+| 0.2.10 | Build enforces programVersion const on installable binaries |
 | 0.2.9 | Release message limit raised from 60 to 80 characters |
 | 0.2.8 | Release governance: concrete change-based messages, canonical command only by default |
 | 0.2.7 | Cross-platform absolute-path detection in enhance marker rules (added Linux /home/ coverage) |

@@ -340,6 +340,159 @@ func TestRunCapturedSoftReturnsErrorOnFailure(t *testing.T) {
 	}
 }
 
+// --- extractProgramVersion tests ---
+
+func TestExtractProgramVersionValid(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.go")
+	os.WriteFile(path, []byte("package main\n\nconst programVersion = \"1.2.3\"\n"), 0o644)
+	ver, err := extractProgramVersion(path)
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if ver != "1.2.3" {
+		t.Fatalf("got %q, want 1.2.3", ver)
+	}
+}
+
+func TestExtractProgramVersionWithTypeAnnotation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.go")
+	os.WriteFile(path, []byte("package main\n\nconst programVersion string = \"0.5.0\"\n"), 0o644)
+	ver, err := extractProgramVersion(path)
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if ver != "0.5.0" {
+		t.Fatalf("got %q, want 0.5.0", ver)
+	}
+}
+
+func TestExtractProgramVersionConstBlock(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.go")
+	os.WriteFile(path, []byte("package main\n\nconst (\n\tprogramVersion = \"2.0.0\"\n)\n"), 0o644)
+	ver, err := extractProgramVersion(path)
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if ver != "2.0.0" {
+		t.Fatalf("got %q, want 2.0.0", ver)
+	}
+}
+
+func TestExtractProgramVersionConstBlockWithType(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.go")
+	os.WriteFile(path, []byte("package main\n\nconst (\n\tprogramVersion string = \"3.1.0\"\n)\n"), 0o644)
+	ver, err := extractProgramVersion(path)
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if ver != "3.1.0" {
+		t.Fatalf("got %q, want 3.1.0", ver)
+	}
+}
+
+func TestExtractProgramVersionConstBlockMultipleConsts(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.go")
+	os.WriteFile(path, []byte("package main\n\nconst (\n\tappName = \"myapp\"\n\tprogramVersion = \"4.0.0\"\n\tmaxRetries = 3\n)\n"), 0o644)
+	ver, err := extractProgramVersion(path)
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if ver != "4.0.0" {
+		t.Fatalf("got %q, want 4.0.0", ver)
+	}
+}
+
+func TestExtractProgramVersionMissing(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.go")
+	os.WriteFile(path, []byte("package main\n\nfunc main() {}\n"), 0o644)
+	ver, err := extractProgramVersion(path)
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if ver != "" {
+		t.Fatalf("got %q, want empty", ver)
+	}
+}
+
+func TestExtractProgramVersionEmpty(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.go")
+	os.WriteFile(path, []byte("package main\n\nconst programVersion = \"\"\n"), 0o644)
+	ver, err := extractProgramVersion(path)
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if ver != "" {
+		t.Fatalf("got %q, want empty for empty-string const", ver)
+	}
+}
+
+func TestExtractProgramVersionNotConst(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.go")
+	os.WriteFile(path, []byte("package main\n\nvar programVersion = \"1.0.0\"\n"), 0o644)
+	ver, err := extractProgramVersion(path)
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if ver != "" {
+		t.Fatalf("got %q, want empty for var (not const)", ver)
+	}
+}
+
+func TestExtractProgramVersionFileNotFound(t *testing.T) {
+	t.Parallel()
+	_, err := extractProgramVersion("/nonexistent/main.go")
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+}
+
+func TestValidateProgramVersionsRejectsEmpty(t *testing.T) {
+	// No t.Parallel() — uses os.Chdir which affects the whole process
+	dir := t.TempDir()
+	cmdDir := filepath.Join(dir, "cmd", "worker")
+	os.MkdirAll(cmdDir, 0o755)
+	os.WriteFile(filepath.Join(cmdDir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	var buf bytes.Buffer
+	err := validateProgramVersions([]string{"worker"}, &buf)
+	if err == nil {
+		t.Fatal("expected error for missing programVersion")
+	}
+	if !strings.Contains(err.Error(), "programVersion") {
+		t.Fatalf("error should mention programVersion, got: %v", err)
+	}
+}
+
+func TestScriptOnlyCommandsExemptFromVersionCheck(t *testing.T) {
+	t.Parallel()
+	// Script-only commands are filtered out by filterInstallTargets,
+	// so they never reach validateProgramVersions.
+	targets := filterInstallTargets([]string{"build", "bootstrap", "rel"})
+	if len(targets) != 0 {
+		t.Fatalf("expected no installable targets from script-only commands, got %v", targets)
+	}
+}
+
 func TestGoFmtNonEmptyOutputFailsBuild(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

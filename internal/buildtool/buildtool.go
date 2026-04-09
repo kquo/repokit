@@ -38,6 +38,8 @@ var scriptOnlyCommands = map[string]struct{}{
 }
 
 var versionPattern = regexp.MustCompile(`^v(\d+)\.(\d+)\.(\d+)$`)
+var programVersionInlineRe = regexp.MustCompile(`(?m)^\s*const\s+programVersion\s*(?:string\s*)?=\s*"([^"]*)"`)
+var programVersionBlockRe = regexp.MustCompile(`(?s)const\s*\(.*?programVersion\s*(?:string\s*)?=\s*"([^"]*)".*?\)`)
 
 func ParseArgs(args []string) (Config, bool, error) {
 	if len(args) == 1 && isHelpArg(args[0]) {
@@ -159,6 +161,12 @@ func Run(cfg Config, out io.Writer, errOut io.Writer) error {
 	}
 	if shouldSkipBinaryInstall(cfg.Targets) {
 		fmt.Fprintf(out, "    %s %s\n", color.Yel("Skipping binary install for"), color.Cya(joinScriptOnlyTargets(cfg.Targets)+"; run them with go run for now."))
+	}
+	if len(targets) > 0 {
+		fmt.Fprintln(out, "\n"+color.Yel("==> Validate programVersion declarations"))
+		if err := validateProgramVersions(targets, out); err != nil {
+			return err
+		}
 	}
 	for _, target := range targets {
 		outputPath := filepath.Join(binDir, target+ext)
@@ -421,6 +429,35 @@ func nextPatchTagFromOutput(output string) (string, bool, error) {
 	})
 	last := versions[len(versions)-1]
 	return fmt.Sprintf("v%d.%d.%d", last.major, last.minor, last.patch+1), true, nil
+}
+
+func extractProgramVersion(path string) (string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	if match := programVersionInlineRe.FindSubmatch(content); match != nil {
+		return string(match[1]), nil
+	}
+	if match := programVersionBlockRe.FindSubmatch(content); match != nil {
+		return string(match[1]), nil
+	}
+	return "", nil
+}
+
+func validateProgramVersions(targets []string, out io.Writer) error {
+	for _, target := range targets {
+		mainPath := filepath.Join("cmd", target, "main.go")
+		ver, err := extractProgramVersion(mainPath)
+		if err != nil {
+			return err
+		}
+		if ver == "" {
+			return fmt.Errorf("cmd/%s/main.go must declare a non-empty const programVersion string literal", target)
+		}
+		fmt.Fprintf(out, "    %s: programVersion = %s\n", color.Cya("cmd/"+target), color.Grn(fmt.Sprintf("%q", ver)))
+	}
+	return nil
 }
 
 func runCaptured(name string, args ...string) (string, error) {

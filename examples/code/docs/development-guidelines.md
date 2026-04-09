@@ -28,6 +28,12 @@ For workflow, see `development-cycle.md`. For validation, see `build-release.md`
 - Grep the full repo for the pattern being changed before considering a fix complete
 - If a template and its rendered output diverge, the template is authoritative
 
+## Program Version Declaration
+
+- Every installable `cmd/<name>/main.go` must declare a non-empty `const programVersion` string literal
+- Script-only helper entrypoints (`build`, `rel`) are exempt
+- The build tool validates this before compiling installable binaries; missing or empty declarations fail the build
+
 ## Error Handling And Validation
 
 - Validate at system boundaries (user input, external APIs, file I/O); trust internal code
