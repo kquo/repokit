@@ -3,6 +3,7 @@
 | Version | Summary |
 |---------|---------|
 | Unreleased | |
+| 0.3.0 | AC13: AC naming convention simplified to acN-slug.md and # ACN titles (hard cutover) |
 | 0.2.10 | Build enforces programVersion const on installable binaries |
 | 0.2.9 | Release message limit raised from 60 to 80 characters |
 | 0.2.8 | Release governance: concrete change-based messages, canonical command only by default |

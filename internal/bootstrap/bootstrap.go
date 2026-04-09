@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 
 	"repokit/internal/color"
@@ -367,7 +368,7 @@ func RunEnhance(root string, cfg Config) error {
 		return err
 	}
 	slug := acSlug(selected)
-	acFileName := fmt.Sprintf("ac-%03d-%s.md", acNum, slug)
+	acFileName := fmt.Sprintf("ac%d-%s.md", acNum, slug)
 	acPath := filepath.Join(docsDir, acFileName)
 	acContent := renderACDoc(selected, deferred, report, acNum)
 
@@ -1564,6 +1565,16 @@ func selectActionableCandidates(candidates []EnhancementCandidate) (selected Enh
 	return selected, deferred, true
 }
 
+var workingACFileRe = regexp.MustCompile(`^ac(\d+)-.*\.md$`)
+
+func isWorkingACFile(name string) bool {
+	return workingACFileRe.MatchString(name)
+}
+
+func isACKeeperFile(name string) bool {
+	return name == "ac-template.md" || name == "ac-example.md"
+}
+
 func nextACNumber(docsDir string) (int, error) {
 	entries, err := os.ReadDir(docsDir)
 	if err != nil {
@@ -1572,25 +1583,13 @@ func nextACNumber(docsDir string) (int, error) {
 	max := 0
 	for _, entry := range entries {
 		name := entry.Name()
-		if !strings.HasPrefix(name, "ac-") || !strings.HasSuffix(name, ".md") {
+		match := workingACFileRe.FindStringSubmatch(name)
+		if match == nil {
 			continue
 		}
-		if name == "ac-template.md" {
+		num, err := strconv.Atoi(match[1])
+		if err != nil {
 			continue
-		}
-		trimmed := strings.TrimPrefix(name, "ac-")
-		before, _, ok := strings.Cut(trimmed, "-")
-		if !ok {
-			continue
-		}
-		numStr := before
-		num := 0
-		for _, ch := range numStr {
-			if ch < '0' || ch > '9' {
-				num = -1
-				break
-			}
-			num = num*10 + int(ch-'0')
 		}
 		if num > max {
 			max = num
@@ -1626,7 +1625,7 @@ func renderACDoc(selected EnhancementCandidate, deferred []EnhancementCandidate,
 	if selected.Section != "" {
 		title = fmt.Sprintf("Enhance: %s — %s", selected.Area, selected.Section)
 	}
-	fmt.Fprintf(&b, "# AC-%03d %s\n\n", acNumber, title)
+	fmt.Fprintf(&b, "# AC%d %s\n\n", acNumber, title)
 
 	b.WriteString("## Objective Fit\n\n")
 	b.WriteString("1. Improve the template based on a governed reference repo review.\n")

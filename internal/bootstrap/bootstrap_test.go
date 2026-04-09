@@ -394,9 +394,11 @@ func TestNextACNumber(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	mustWrite(t, filepath.Join(dir, "ac-001-first.md"), "# AC\n")
-	mustWrite(t, filepath.Join(dir, "ac-003-third.md"), "# AC\n")
+	mustWrite(t, filepath.Join(dir, "ac1-first.md"), "# AC\n")
+	mustWrite(t, filepath.Join(dir, "ac3-third.md"), "# AC\n")
 	mustWrite(t, filepath.Join(dir, "ac-template.md"), "# Template\n")
+	mustWrite(t, filepath.Join(dir, "ac-example.md"), "# Example\n")
+	mustWrite(t, filepath.Join(dir, "ac-001-old.md"), "# Old format\n")
 	mustWrite(t, filepath.Join(dir, "other.md"), "# Other\n")
 
 	num, err := nextACNumber(dir)
@@ -404,7 +406,49 @@ func TestNextACNumber(t *testing.T) {
 		t.Fatalf("nextACNumber() error = %v", err)
 	}
 	if num != 4 {
-		t.Fatalf("nextACNumber() = %d, want 4", num)
+		t.Fatalf("nextACNumber() = %d, want 4 (old-format ac-001-old.md must be ignored)", num)
+	}
+}
+
+func TestIsWorkingACFile(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{"ac1-foo.md", true},
+		{"ac10-foo.md", true},
+		{"ac100-foo.md", true},
+		{"ac-template.md", false},
+		{"ac-example.md", false},
+		{"ac-001-foo.md", false},
+		{"acfoo.md", false},
+		{"ac1.md", false},
+		{"random.md", false},
+	}
+	for _, tc := range cases {
+		if got := isWorkingACFile(tc.name); got != tc.want {
+			t.Errorf("isWorkingACFile(%q) = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestIsACKeeperFile(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{"ac-template.md", true},
+		{"ac-example.md", true},
+		{"ac1-foo.md", false},
+		{"ac-001-foo.md", false},
+		{"random.md", false},
+	}
+	for _, tc := range cases {
+		if got := isACKeeperFile(tc.name); got != tc.want {
+			t.Errorf("isACKeeperFile(%q) = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
 
@@ -446,7 +490,7 @@ func TestRenderACDocIncludesRequiredSections(t *testing.T) {
 
 	content := renderACDoc(selected, deferred, report, 2)
 	for _, want := range []string{
-		"# AC-002 Enhance: base governance — Interaction Mode",
+		"# AC2 Enhance: base governance — Interaction Mode",
 		"## Objective Fit",
 		"## Summary",
 		"portable delta",
@@ -534,7 +578,7 @@ func TestRunEnhanceNoActionableCandidatesCreatesNoFile(t *testing.T) {
 
 	entries, _ := os.ReadDir(filepath.Join(templateRoot, "docs"))
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), "ac-") && entry.Name() != "ac-template.md" {
+		if isWorkingACFile(entry.Name()) {
 			t.Fatalf("unexpected AC doc created: %s", entry.Name())
 		}
 	}
@@ -588,7 +632,7 @@ Base purpose.
 		t.Fatalf("ReadFile() error = %v", err)
 	}
 	contentStr := string(content)
-	for _, want := range []string{"# AC-001", "## Summary", "## Status", "PENDING"} {
+	for _, want := range []string{"# AC1", "## Summary", "## Status", "PENDING"} {
 		if !strings.Contains(contentStr, want) {
 			t.Fatalf("AC doc missing %q", want)
 		}
@@ -648,7 +692,7 @@ Base purpose.
 	acCount := 0
 	var acFile string
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), "ac-") && entry.Name() != "ac-template.md" {
+		if isWorkingACFile(entry.Name()) {
 			acCount++
 			acFile = entry.Name()
 		}
@@ -703,7 +747,7 @@ Base purpose.
 	docsDir := filepath.Join(templateRoot, "docs")
 	entries, _ := os.ReadDir(docsDir)
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), "ac-") && entry.Name() != "ac-template.md" {
+		if isWorkingACFile(entry.Name()) {
 			t.Fatalf("dry-run should not create AC doc, found: %s", entry.Name())
 		}
 	}
@@ -716,7 +760,7 @@ func findACDoc(t *testing.T, docsDir string) string {
 		t.Fatalf("ReadDir(%q) error = %v", docsDir, err)
 	}
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), "ac-") && entry.Name() != "ac-template.md" {
+		if isWorkingACFile(entry.Name()) {
 			return entry.Name()
 		}
 	}

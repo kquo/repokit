@@ -1,4 +1,4 @@
-# AC-001 Add User Authentication (EXAMPLE)
+# AC1 Add User Authentication (EXAMPLE)
 
 > This is an example AC document, not an active change request.
 > It demonstrates the AC pattern used in this repo. Use `ac-template.md` as the starting point for real ACs.
