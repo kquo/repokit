@@ -3055,3 +3055,49 @@ func TestDevelopmentCycleMentionsPriorities(t *testing.T) {
 		}
 	}
 }
+
+func TestACFilenameConventionSurfacedInDocs(t *testing.T) {
+	t.Parallel()
+	hintFiles := []string{
+		"docs/ac-template.md",
+		"docs/development-cycle.md",
+		"overlays/code/files/docs/ac-template.md.tmpl",
+		"overlays/code/files/docs/development-cycle.md.tmpl",
+		"examples/code/docs/ac-template.md",
+		"examples/code/docs/development-cycle.md",
+	}
+	for _, path := range hintFiles {
+		content := readRepoFile(t, path)
+		if !strings.Contains(content, "acN-short-slug.md") {
+			t.Errorf("%s: should contain literal `acN-short-slug.md` so contributors can name AC files from docs alone", path)
+		}
+	}
+}
+
+func TestACDocsReadmeUsesCurrentConvention(t *testing.T) {
+	t.Parallel()
+	overlayReadmes := []string{
+		"overlays/code/files/docs/README.md.tmpl",
+		"examples/code/docs/README.md",
+	}
+	for _, path := range overlayReadmes {
+		content := readRepoFile(t, path)
+		if !strings.Contains(content, "acN-short-slug.md") {
+			t.Errorf("%s: should describe AC files using current `acN-short-slug.md` convention", path)
+		}
+		if strings.Contains(content, "ac_<id>") {
+			t.Errorf("%s: should NOT use stale underscore form `ac_<id>` (replaced by `acN-short-slug.md` in AC13)", path)
+		}
+		if strings.Contains(content, "critique") {
+			t.Errorf("%s: should NOT mention AC critiques (no critique files exist in repo; bullet was dropped in AC15)", path)
+		}
+	}
+
+	selfHosted := readRepoFile(t, "docs/README.md")
+	if !strings.Contains(selfHosted, "acN-short-slug.md") {
+		t.Error("docs/README.md: should describe AC files using current `acN-short-slug.md` convention")
+	}
+	if strings.Contains(selfHosted, "`ac-*.md`") {
+		t.Error("docs/README.md: should NOT use stale glob `ac-*.md` (matches keepers but not working AC files post-AC13)")
+	}
+}

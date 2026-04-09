@@ -4,8 +4,7 @@ Use this directory for governed implementation support documents.
 
 Recommended contents:
 
-- `ac_<id>.md` for acceptance criteria
-- `ac_<id>-critique.md` for external critiques
+- `acN-short-slug.md` for acceptance criteria (sequential N, kebab-case slug; see `ac-template.md`)
 - `development-cycle.md` for repo workflow rules
 - `build-release.md` for build, test, and release rules
 - reference notes that support implementation decisions

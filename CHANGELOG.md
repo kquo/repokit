@@ -3,6 +3,7 @@
 | Version | Summary |
 |---------|---------|
 | Unreleased | |
+| 0.3.2 | AC15: AC filename convention surfaced in ac-template.md, development-cycle.md, and docs/README.md files (stale ac_<id> guidance corrected) |
 | 0.3.1 | AC14: Ideas To Explore section in plan.md, pre-rubric vs Priorities boundary |
 | 0.3.0 | AC13: AC naming convention simplified to acN-slug.md and # ACN titles (hard cutover) |
 | 0.2.10 | Build enforces programVersion const on installable binaries |

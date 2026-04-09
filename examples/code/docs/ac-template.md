@@ -1,3 +1,5 @@
+> Save as `docs/acN-short-slug.md` (sequential N, kebab-case slug).
+
 # AC<N> Title
 
 ## Objective Fit
