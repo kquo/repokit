@@ -17,7 +17,7 @@ import (
 	"github.com/kquo/repokit/internal/templates"
 )
 
-const programVersion = "0.5.0"
+const programVersion = "0.6.0"
 
 const sourceRepo = "github.com/kquo/repokit"
 
@@ -70,14 +70,28 @@ func main() {
 			os.Exit(1)
 		}
 		repoRoot = root
-		tfs = templates.DiskFS(root)
+
+		if cfg.Reference == "" {
+			// Self-review: compare on-disk templates against embedded baseline.
+			deltas, err := bootstrap.RunSelfReview(templates.EmbeddedFS, templates.DiskFS(root), templates.TemplateVersion)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			bootstrap.PrintSelfReview(deltas, templates.TemplateVersion)
+		} else {
+			tfs = templates.DiskFS(root)
+			if err := bootstrap.RunWithFS(tfs, repoRoot, cfg); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+		}
 	} else {
 		tfs = templates.EmbeddedFS
-	}
-
-	if err := bootstrap.RunWithFS(tfs, repoRoot, cfg); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		if err := bootstrap.RunWithFS(tfs, repoRoot, cfg); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	}
 
 	// Wait for version check (bounded by the 2-second HTTP timeout).

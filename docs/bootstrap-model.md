@@ -104,7 +104,7 @@ Reasons:
 - requiring Go is acceptable for the target audience
 - argument parsing, file operations, and dry-run reporting are easier to keep deterministic in Go
 
-The canonical entrypoint is `cmd/bootstrap/main.go`, invoked via `go run <template-root>/cmd/bootstrap`.
+The canonical entrypoint is `cmd/repokit/main.go`, installed via `go install github.com/kquo/repokit/cmd/repokit@latest`.
 
 ## CLI Convention
 
@@ -198,7 +198,7 @@ Mode-specific expectations:
 - `adopt`: requires `type` unless inferred confidently, `repo-name`, and `purpose`; when type is specified, overlay-specific metadata also becomes required (`stack` for CODE, `publishing-platform` and `style` for DOC)
 - `enhance`: requires `reference` and should normally run with this template repo as the current working tree
 
-The implementation lives in `cmd/bootstrap/`, invoked via `go run <template-root>/cmd/bootstrap`.
+The implementation lives in `cmd/repokit/`, installed via `go install github.com/kquo/repokit/cmd/repokit@latest`.
 
 ## Agent Responsibilities
 
@@ -322,7 +322,7 @@ To support the workflow above, this repo should contain:
 - `internal/templates/base/` for cross-repo governance
 - `internal/templates/overlays/code/` for code-repo-specific files
 - `internal/templates/overlays/doc/` for doc-repo-specific files
-- `cmd/bootstrap/` as the single deterministic renderer
+- `cmd/repokit/` as the single deterministic renderer
 - `examples/` showing one bootstrapped `CODE` repo and one bootstrapped `DOC` repo
 
 This structure lets an agent use the template repo as a stable frame of reference while keeping every generated repo self-contained.

@@ -3,6 +3,7 @@
 | Version | Summary |
 |---------|---------|
 | Unreleased | |
+| 0.6.0 | AC20: self-review enhance without `-r`, retired `cmd/bootstrap` |
 | 0.5.0 | AC19: installable `repokit` CLI binary with embedded templates, subcommands, GitHub version check, module path github.com/kquo/repokit |
 | 0.4.0 | AC18: templates moved to internal/templates/, bootstrap refactored to fs.FS abstraction |
 | 0.3.4 | AC17: ## Why section in generated READMEs, adopt advisory for missing Why, IE cleanup rule |

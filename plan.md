@@ -20,7 +20,7 @@ Every new roadmap item should answer:
 
 ## Priorities
 
-- AC20: implement `-r`-less enhance (self-review against embedded templates), retire `cmd/bootstrap`
+(no active roadmap items)
 
 ## Ideas To Explore
 

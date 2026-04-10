@@ -49,12 +49,18 @@ repokit adopt \
 ### `enhance`
 Template-maintenance mode, run from inside this repo. The only mode that runs from repokit itself and the only mode that can propose changes back into the template.
 
-Enhance inspects another governed repo by reference path, comparing at the constraint level for governance sections and per-section for structured markdown files. When a `.repokit-manifest` exists in the reference repo, enhance uses three-way comparison to distinguish user customizations from stale template content. With `--apply`, it writes `.template-proposed` files for assisted merge. No template files are overwritten automatically.
+With `-r`, enhance inspects another governed repo by reference path, comparing at the constraint level for governance sections and per-section for structured markdown files. When a `.repokit-manifest` exists in the reference repo, enhance uses three-way comparison to distinguish user customizations from stale template content. With `--apply`, it writes `.template-proposed` files for assisted merge. No template files are overwritten automatically.
 
 ```bash
 repokit enhance \
   -r <reference-root> \
   -d
+```
+
+Without `-r`, enhance performs a self-review — comparing on-disk templates against the embedded versions to show what has changed since the last release. This is a pre-release audit tool.
+
+```bash
+repokit enhance
 ```
 
 Run `repokit help` for all commands, or `repokit <command> --help` for command-specific flags.

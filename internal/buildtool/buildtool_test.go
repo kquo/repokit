@@ -48,8 +48,8 @@ func TestParseArgsVerboseAndTargets(t *testing.T) {
 func TestPackageScopes(t *testing.T) {
 	t.Parallel()
 
-	got := packageScopes([]string{"bootstrap", "rel"})
-	want := []string{"./cmd/bootstrap", "./cmd/rel"}
+	got := packageScopes([]string{"repokit", "rel"})
+	want := []string{"./cmd/repokit", "./cmd/rel"}
 	if len(got) != len(want) {
 		t.Fatalf("packageScopes() len = %d, want %d", len(got), len(want))
 	}
@@ -63,18 +63,12 @@ func TestPackageScopes(t *testing.T) {
 func TestBuildTargetsSkipsScriptOnlyCommands(t *testing.T) {
 	t.Parallel()
 
-	got, err := buildTargets([]string{"build", "bootstrap", "rel"})
+	got, err := buildTargets([]string{"build", "rel"})
 	if err != nil {
 		t.Fatalf("buildTargets() error = %v", err)
 	}
-	want := []string{}
-	if len(got) != len(want) {
-		t.Fatalf("buildTargets() len = %d, want %d", len(got), len(want))
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("buildTargets()[%d] = %q, want %q", i, got[i], want[i])
-		}
+	if len(got) != 0 {
+		t.Fatalf("buildTargets() len = %d, want 0", len(got))
 	}
 }
 
@@ -84,8 +78,8 @@ func TestShouldSkipBinaryInstall(t *testing.T) {
 	if !shouldSkipBinaryInstall(nil) {
 		t.Fatal("expected default build to report skipped script-only commands")
 	}
-	if !shouldSkipBinaryInstall([]string{"bootstrap"}) {
-		t.Fatal("expected bootstrap target to be treated as script-only")
+	if !shouldSkipBinaryInstall([]string{"build"}) {
+		t.Fatal("expected build target to be treated as script-only")
 	}
 	if shouldSkipBinaryInstall([]string{"worker"}) {
 		t.Fatal("did not expect installable target to be treated as script-only")
@@ -95,10 +89,10 @@ func TestShouldSkipBinaryInstall(t *testing.T) {
 func TestJoinScriptOnlyTargets(t *testing.T) {
 	t.Parallel()
 
-	if got := joinScriptOnlyTargets(nil); got != "cmd/bootstrap, cmd/build, cmd/rel" {
+	if got := joinScriptOnlyTargets(nil); got != "cmd/build, cmd/rel" {
 		t.Fatalf("joinScriptOnlyTargets(nil) = %q", got)
 	}
-	if got := joinScriptOnlyTargets([]string{"worker", "bootstrap", "rel"}); got != "cmd/bootstrap, cmd/rel" {
+	if got := joinScriptOnlyTargets([]string{"worker", "build", "rel"}); got != "cmd/build, cmd/rel" {
 		t.Fatalf("joinScriptOnlyTargets(requested) = %q", got)
 	}
 }
@@ -487,7 +481,7 @@ func TestScriptOnlyCommandsExemptFromVersionCheck(t *testing.T) {
 	t.Parallel()
 	// Script-only commands are filtered out by filterInstallTargets,
 	// so they never reach validateProgramVersions.
-	targets := filterInstallTargets([]string{"build", "bootstrap", "rel"})
+	targets := filterInstallTargets([]string{"build", "rel"})
 	if len(targets) != 0 {
 		t.Fatalf("expected no installable targets from script-only commands, got %v", targets)
 	}

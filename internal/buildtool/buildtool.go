@@ -32,9 +32,8 @@ type semver struct {
 // build, bootstrap, and rel are intentionally treated as go-run entrypoints
 // rather than installed binaries for now. That may change in the future.
 var scriptOnlyCommands = map[string]struct{}{
-	"build":     {},
-	"bootstrap": {},
-	"rel":       {},
+	"build": {},
+	"rel":   {},
 }
 
 var versionPattern = regexp.MustCompile(`^v(\d+)\.(\d+)\.(\d+)$`)

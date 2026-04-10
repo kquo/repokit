@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -99,7 +98,6 @@ type operation struct {
 }
 
 type flagValues struct {
-	mode               string
 	target             string
 	reference          string
 	repoType           string
@@ -111,97 +109,6 @@ type flagValues struct {
 	initGit            bool
 	dryRun             bool
 	apply              bool
-}
-
-func ParseArgs(args []string) (Config, bool, error) {
-	values := flagValues{}
-	fs := flag.NewFlagSet("bootstrap", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	fs.StringVar(&values.mode, "m", "", "mode: new|adopt|enhance")
-	fs.StringVar(&values.mode, "mode", "", "mode: new|adopt|enhance")
-	fs.StringVar(&values.target, "t", "", "target directory")
-	fs.StringVar(&values.target, "target", "", "target directory")
-	fs.StringVar(&values.reference, "r", "", "reference repo for enhance")
-	fs.StringVar(&values.reference, "reference", "", "reference repo for enhance")
-	fs.StringVar(&values.repoType, "y", "", "repo type: CODE|DOC")
-	fs.StringVar(&values.repoType, "type", "", "repo type: CODE|DOC")
-	fs.StringVar(&values.repoName, "n", "", "repo name")
-	fs.StringVar(&values.repoName, "repo-name", "", "repo name")
-	fs.StringVar(&values.purpose, "p", "", "project purpose")
-	fs.StringVar(&values.purpose, "purpose", "", "project purpose")
-	fs.StringVar(&values.stack, "s", "", "stack or platform for CODE repos")
-	fs.StringVar(&values.stack, "stack", "", "stack or platform for CODE repos")
-	fs.StringVar(&values.publishingPlatform, "u", "", "publishing platform for DOC repos")
-	fs.StringVar(&values.publishingPlatform, "publishing-platform", "", "publishing platform for DOC repos")
-	fs.StringVar(&values.style, "v", "", "style or voice for DOC repos")
-	fs.StringVar(&values.style, "style", "", "style or voice for DOC repos")
-	fs.BoolVar(&values.initGit, "g", false, "initialize git if target is not already a repo")
-	fs.BoolVar(&values.initGit, "init-git", false, "initialize git if target is not already a repo")
-	fs.BoolVar(&values.dryRun, "d", false, "preview changes without writing")
-	fs.BoolVar(&values.dryRun, "dry-run", false, "preview changes without writing")
-	fs.BoolVar(&values.apply, "a", false, "write .template-proposed files for actionable candidates (enhance only)")
-	fs.BoolVar(&values.apply, "apply", false, "write .template-proposed files for actionable candidates (enhance only)")
-	fs.Usage = func() {
-		fmt.Fprint(fs.Output(), color.FormatUsage("bootstrap -m, --mode new|adopt|enhance [options]", []color.UsageLine{
-			{Flag: "-m, --mode string", Desc: "mode: new|adopt|enhance"},
-			{Flag: "-t, --target string", Desc: "target directory (default: cwd)"},
-			{Flag: "-r, --reference string", Desc: "reference repo for enhance"},
-			{Flag: "-y, --type string", Desc: "repo type: CODE|DOC"},
-			{Flag: "-n, --repo-name string", Desc: "repo name"},
-			{Flag: "-p, --purpose string", Desc: "project purpose"},
-			{Flag: "-s, --stack string", Desc: "stack or platform for CODE repos"},
-			{Flag: "-u, --publishing-platform string", Desc: "publishing platform for DOC repos"},
-			{Flag: "-v, --style string", Desc: "style or voice for DOC repos"},
-			{Flag: "-g, --init-git", Desc: "initialize git if target is not already a repo"},
-			{Flag: "-d, --dry-run", Desc: "preview changes without writing"},
-			{Flag: "-a, --apply", Desc: "write .template-proposed files (enhance only)"},
-			{Flag: "-h, -?, --help", Desc: "show this help"},
-		}, ""))
-	}
-	if slices.Contains(args, "-?") {
-		fs.Usage()
-		return Config{}, true, nil
-	}
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return Config{}, true, nil
-		}
-		return Config{}, false, err
-	}
-
-	target := strings.TrimSpace(values.target)
-	if target == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return Config{}, false, fmt.Errorf("resolve current working directory: %w", err)
-		}
-		target = cwd
-	}
-
-	cfg := Config{
-		Mode:               Mode(strings.ToLower(strings.TrimSpace(values.mode))),
-		Target:             target,
-		Reference:          strings.TrimSpace(values.reference),
-		Type:               RepoType(strings.ToUpper(strings.TrimSpace(values.repoType))),
-		RepoName:           strings.TrimSpace(values.repoName),
-		Purpose:            strings.TrimSpace(values.purpose),
-		Stack:              strings.TrimSpace(values.stack),
-		PublishingPlatform: strings.TrimSpace(values.publishingPlatform),
-		Style:              strings.TrimSpace(values.style),
-		InitGit:            values.initGit,
-		DryRun:             values.dryRun,
-		Apply:              values.apply,
-	}
-	return cfg, false, validateConfig(cfg)
-}
-
-func Run(cfg Config) error {
-	repoRoot, err := resolveRepoRoot()
-	if err != nil {
-		return err
-	}
-	tfs := templates.DiskFS(repoRoot)
-	return RunWithFS(tfs, repoRoot, cfg)
 }
 
 func RunWithFS(tfs fs.FS, repoRoot string, cfg Config) error {
@@ -330,9 +237,7 @@ func validateConfig(cfg Config) error {
 			}
 		}
 	case ModeEnhance:
-		if cfg.Reference == "" {
-			return errors.New("reference repo is required for enhance mode: use -r or --reference")
-		}
+		// -r is optional: empty means self-review mode
 	default:
 		return errors.New("mode is required: use -m or --mode")
 	}
@@ -340,22 +245,6 @@ func validateConfig(cfg Config) error {
 		return errors.New("--apply is only valid with --mode enhance")
 	}
 	return nil
-}
-
-func resolveRepoRoot() (string, error) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		return "", errors.New("resolve repo root: runtime caller unavailable")
-	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
-	info, err := os.Stat(root)
-	if err != nil {
-		return "", fmt.Errorf("stat repo root: %w", err)
-	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("repo root is not a directory: %s", root)
-	}
-	return root, nil
 }
 
 func runNewOrAdopt(tfs fs.FS, repoRoot string, cfg Config, adopt bool) error {
@@ -388,8 +277,7 @@ func runNewOrAdopt(tfs fs.FS, repoRoot string, cfg Config, adopt bool) error {
 		return err
 	}
 
-	versionContent, _ := os.ReadFile(filepath.Join(repoRoot, "TEMPLATE_VERSION"))
-	templateVersion := strings.TrimSpace(string(versionContent))
+	templateVersion := readTemplateVersion(repoRoot)
 	manifest := buildManifest(canonical, templateVersion, tfs, repoRoot, targetAbs)
 	manifestOp := operation{
 		kind:    "write",
@@ -418,7 +306,7 @@ func runNewOrAdopt(tfs fs.FS, repoRoot string, cfg Config, adopt bool) error {
 	return nil
 }
 
-// RunEnhance runs enhance mode against a reference repo. Exported for testing.
+// RunEnhance runs enhance mode against a reference repo.
 func RunEnhance(tfs fs.FS, repoRoot string, cfg Config) error {
 	refAbs, err := filepath.Abs(cfg.Reference)
 	if err != nil {
@@ -470,6 +358,112 @@ func RunEnhance(tfs fs.FS, repoRoot string, cfg Config) error {
 	}
 	fmt.Println("enhance mode is review-first: no template changes applied")
 	return nil
+}
+
+// SelfReviewDelta represents a single file difference found during self-review.
+type SelfReviewDelta struct {
+	Path     string
+	Kind     string   // "changed", "added", "removed"
+	Sections []string // non-empty for structured markdown with per-section diffs
+}
+
+// RunSelfReview compares two template FS instances (typically embedded vs on-disk)
+// and reports files that differ. This is an informational pre-release audit tool;
+// it does not create AC docs or proposal files.
+// selfReviewRoots are the subdirectories within the template FS that
+// self-review compares. Go source files at the FS root are excluded.
+var selfReviewRoots = []string{"base", "overlays"}
+
+func RunSelfReview(baselineFS, currentFS fs.FS, version string) ([]SelfReviewDelta, error) {
+	baselineFiles := make(map[string]string)
+	for _, root := range selfReviewRoots {
+		err := fs.WalkDir(baselineFS, root, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return err
+			}
+			content, readErr := fs.ReadFile(baselineFS, path)
+			if readErr != nil {
+				return readErr
+			}
+			baselineFiles[path] = string(content)
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("walk baseline templates (%s): %w", root, err)
+		}
+	}
+
+	var deltas []SelfReviewDelta
+	currentFiles := make(map[string]bool)
+
+	for _, root := range selfReviewRoots {
+		err := fs.WalkDir(currentFS, root, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return err
+			}
+			currentFiles[path] = true
+			content, readErr := fs.ReadFile(currentFS, path)
+			if readErr != nil {
+				return readErr
+			}
+			currentContent := string(content)
+
+			baselineContent, exists := baselineFiles[path]
+			if !exists {
+				deltas = append(deltas, SelfReviewDelta{Path: path, Kind: "added"})
+				return nil
+			}
+			if currentContent != baselineContent {
+				delta := SelfReviewDelta{Path: path, Kind: "changed"}
+				if strings.HasSuffix(path, ".md") || strings.HasSuffix(path, ".md.tmpl") {
+					delta.Sections = diffMarkdownSections(baselineContent, currentContent)
+				}
+				deltas = append(deltas, delta)
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("walk current templates (%s): %w", root, err)
+		}
+	}
+
+	for path := range baselineFiles {
+		if !currentFiles[path] {
+			deltas = append(deltas, SelfReviewDelta{Path: path, Kind: "removed"})
+		}
+	}
+
+	slices.SortFunc(deltas, func(a, b SelfReviewDelta) int {
+		return cmp.Compare(a.Path, b.Path)
+	})
+	return deltas, nil
+}
+
+func PrintSelfReview(deltas []SelfReviewDelta, version string) {
+	fmt.Printf("mode: self-review (comparing local templates against embedded v%s)\n", version)
+	if len(deltas) == 0 {
+		fmt.Println("no changes since embedded version")
+		return
+	}
+	changed, added, removed := 0, 0, 0
+	for _, d := range deltas {
+		switch d.Kind {
+		case "changed":
+			changed++
+			if len(d.Sections) > 0 {
+				fmt.Printf("  %s %s (sections: %s)\n", color.Yel("changed:"), d.Path, strings.Join(d.Sections, ", "))
+			} else {
+				fmt.Printf("  %s %s\n", color.Yel("changed:"), d.Path)
+			}
+		case "added":
+			added++
+			fmt.Printf("  %s   %s\n", color.Grn("added:"), d.Path)
+		case "removed":
+			removed++
+			fmt.Printf("  %s %s\n", color.Red("removed:"), d.Path)
+		}
+	}
+	fmt.Printf("summary: %d changed, %d added, %d removed\n", changed, added, removed)
 }
 
 func applyProposals(repoRoot string, selected EnhancementCandidate, deferred []EnhancementCandidate, dryRun bool) error {
@@ -645,8 +639,6 @@ func ReviewEnhancement(tfs fs.FS, repoRoot string, referenceRoot string) (Enhanc
 	}
 
 	mappings := []enhancementMapping{
-		{Area: "bootstrap behavior", ReferencePaths: []string{"cmd/bootstrap/main.go", "scripts/bootstrap"}, TemplateTarget: "cmd/bootstrap/main.go"},
-		{Area: "bootstrap behavior", ReferencePaths: []string{"scripts/bootstrap"}, TemplateTarget: "scripts/README.md"},
 		{Area: "CODE overlay", ReferencePaths: []string{"README.md"}, TemplateTarget: "overlays/code/files/README.md.tmpl"},
 		{Area: "CODE overlay", ReferencePaths: []string{"arch.md"}, TemplateTarget: "overlays/code/files/arch.md.tmpl"},
 		{Area: "CODE overlay", ReferencePaths: []string{"plan.md"}, TemplateTarget: "overlays/code/files/plan.md.tmpl"},
@@ -756,10 +748,7 @@ func planCanonical(tfs fs.FS, repoRoot string, cfg Config, targetRoot string) ([
 		source:  "base/AGENTS.md",
 	}}
 
-	versionContent, err := os.ReadFile(filepath.Join(repoRoot, "TEMPLATE_VERSION"))
-	if err != nil {
-		return nil, fmt.Errorf("read template version: %w", err)
-	}
+	versionContent := []byte(readTemplateVersion(repoRoot))
 	ops = append(ops, operation{
 		kind:    "write",
 		path:    filepath.Join(targetRoot, "TEMPLATE_VERSION"),
@@ -1856,6 +1845,20 @@ func proposalPath(path string) string {
 // readTemplateOrRoot reads a file from the template FS first; if not found,
 // falls back to the repo root. This handles files like TEMPLATE_VERSION that
 // live at the repo root rather than inside internal/templates/.
+// readTemplateVersion returns the template version string. When repoRoot is
+// set (enhance mode, dev), it reads from the TEMPLATE_VERSION file on disk.
+// When repoRoot is empty (installed binary, consumer modes), it falls back
+// to the compiled-in templates.TemplateVersion constant.
+func readTemplateVersion(repoRoot string) string {
+	if repoRoot != "" {
+		content, err := os.ReadFile(filepath.Join(repoRoot, "TEMPLATE_VERSION"))
+		if err == nil {
+			return strings.TrimSpace(string(content))
+		}
+	}
+	return templates.TemplateVersion
+}
+
 func readTemplateOrRoot(tfs fs.FS, repoRoot, path string) ([]byte, error) {
 	content, err := fs.ReadFile(tfs, path)
 	if err == nil {

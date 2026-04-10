@@ -7,12 +7,11 @@ import (
 	"path/filepath"
 )
 
-//go:embed base overlays
+//go:embed all:base all:overlays
 var EmbeddedFS embed.FS
 
 // DiskFS returns a filesystem rooted at the templates directory
-// within a local repokit checkout. Used by enhance mode and
-// cmd/bootstrap.
+// within a local repokit checkout. Used by enhance mode.
 func DiskFS(repoRoot string) fs.FS {
 	return os.DirFS(filepath.Join(repoRoot, "internal", "templates"))
 }

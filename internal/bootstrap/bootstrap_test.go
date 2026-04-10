@@ -872,27 +872,27 @@ func TestDisplayReferencePathEmpty(t *testing.T) {
 	}
 }
 
-// --- ParseArgs help/error tests ---
+// --- ParseModeArgs help/error tests ---
 
-func TestParseArgsHelpReturnsCleanExit(t *testing.T) {
+func TestParseModeArgsHelpReturnsCleanExit(t *testing.T) {
 	t.Parallel()
-	_, help, err := ParseArgs([]string{"--help"})
+	_, help, err := ParseModeArgs(ModeNew, []string{"--help"})
 	if err != nil {
-		t.Fatalf("ParseArgs(--help) error = %v, want nil", err)
+		t.Fatalf("ParseModeArgs(--help) error = %v, want nil", err)
 	}
 	if !help {
-		t.Fatal("ParseArgs(--help) help = false, want true")
+		t.Fatal("ParseModeArgs(--help) help = false, want true")
 	}
 }
 
-func TestParseArgsInvalidFlagReturnsError(t *testing.T) {
+func TestParseModeArgsInvalidFlagReturnsError(t *testing.T) {
 	t.Parallel()
-	_, help, err := ParseArgs([]string{"--bogus-flag"})
+	_, help, err := ParseModeArgs(ModeNew, []string{"--bogus-flag"})
 	if err == nil {
-		t.Fatal("ParseArgs(--bogus-flag) expected error")
+		t.Fatal("ParseModeArgs(--bogus-flag) expected error")
 	}
 	if help {
-		t.Fatal("ParseArgs(--bogus-flag) help = true, want false")
+		t.Fatal("ParseModeArgs(--bogus-flag) help = true, want false")
 	}
 }
 
@@ -986,11 +986,11 @@ func TestValidateConfigEnhanceValid(t *testing.T) {
 	}
 }
 
-func TestValidateConfigEnhanceMissingRef(t *testing.T) {
+func TestValidateConfigEnhanceEmptyRefAllowed(t *testing.T) {
 	t.Parallel()
 	err := validateConfig(Config{Mode: ModeEnhance})
-	if err == nil {
-		t.Fatal("expected error for missing reference")
+	if err != nil {
+		t.Fatalf("expected no error for enhance with empty reference (self-review), got: %v", err)
 	}
 }
 
@@ -3417,7 +3417,6 @@ func TestImportPathsUseGitHub(t *testing.T) {
 	root := repoRoot(t)
 	// Check a representative set of files
 	for _, rel := range []string{
-		"cmd/bootstrap/main.go",
 		"cmd/build/main.go",
 		"cmd/repokit/main.go",
 		"internal/bootstrap/bootstrap.go",
@@ -3429,5 +3428,177 @@ func TestImportPathsUseGitHub(t *testing.T) {
 		if strings.Contains(string(content), `"repokit/internal/`) {
 			t.Errorf("%s: import path uses old module name \"repokit/internal/\" instead of \"github.com/kquo/repokit/internal/\"", rel)
 		}
+	}
+}
+
+func TestParseModeArgsEnhanceEmptyReferenceOK(t *testing.T) {
+	t.Parallel()
+	cfg, help, err := ParseModeArgs(ModeEnhance, []string{})
+	if err != nil {
+		t.Fatalf("ParseModeArgs(enhance, []) error = %v, want nil", err)
+	}
+	if help {
+		t.Fatal("expected help = false")
+	}
+	if cfg.Reference != "" {
+		t.Fatalf("Reference = %q, want empty", cfg.Reference)
+	}
+}
+
+func TestParseModeArgsEnhanceWithReference(t *testing.T) {
+	t.Parallel()
+	cfg, _, err := ParseModeArgs(ModeEnhance, []string{"-r", "/some/path"})
+	if err != nil {
+		t.Fatalf("ParseModeArgs(enhance, -r) error = %v", err)
+	}
+	if cfg.Reference != "/some/path" {
+		t.Fatalf("Reference = %q, want /some/path", cfg.Reference)
+	}
+}
+
+func TestSelfReviewIdenticalFSProducesNoDeltas(t *testing.T) {
+	t.Parallel()
+	deltas, err := RunSelfReview(templates.EmbeddedFS, templates.EmbeddedFS, templates.TemplateVersion)
+	if err != nil {
+		t.Fatalf("RunSelfReview() error = %v", err)
+	}
+	if len(deltas) != 0 {
+		t.Fatalf("expected 0 deltas for identical FS, got %d: %v", len(deltas), deltas)
+	}
+}
+
+func TestSelfReviewDetectsChangedFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	err := fs.WalkDir(templates.EmbeddedFS, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		content, readErr := fs.ReadFile(templates.EmbeddedFS, path)
+		if readErr != nil {
+			return readErr
+		}
+		full := filepath.Join(dir, filepath.FromSlash(path))
+		if mkErr := os.MkdirAll(filepath.Dir(full), 0o755); mkErr != nil {
+			return mkErr
+		}
+		return os.WriteFile(full, content, 0o644)
+	})
+	if err != nil {
+		t.Fatalf("copy embedded FS: %v", err)
+	}
+	mustWrite(t, filepath.Join(dir, "base", "AGENTS.md"), "# Modified AGENTS.md\n\n## Purpose\n\nChanged content.\n")
+
+	deltas, err := RunSelfReview(templates.EmbeddedFS, os.DirFS(dir), templates.TemplateVersion)
+	if err != nil {
+		t.Fatalf("RunSelfReview() error = %v", err)
+	}
+	found := false
+	for _, d := range deltas {
+		if d.Path == "base/AGENTS.md" && d.Kind == "changed" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("expected delta for base/AGENTS.md, got none")
+	}
+}
+
+func TestSelfReviewDetectsAddedFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	err := fs.WalkDir(templates.EmbeddedFS, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		content, readErr := fs.ReadFile(templates.EmbeddedFS, path)
+		if readErr != nil {
+			return readErr
+		}
+		full := filepath.Join(dir, filepath.FromSlash(path))
+		if mkErr := os.MkdirAll(filepath.Dir(full), 0o755); mkErr != nil {
+			return mkErr
+		}
+		return os.WriteFile(full, content, 0o644)
+	})
+	if err != nil {
+		t.Fatalf("copy embedded FS: %v", err)
+	}
+	mustWrite(t, filepath.Join(dir, "overlays", "code", "files", "new-file.md.tmpl"), "# New file\n")
+
+	deltas, err := RunSelfReview(templates.EmbeddedFS, os.DirFS(dir), templates.TemplateVersion)
+	if err != nil {
+		t.Fatalf("RunSelfReview() error = %v", err)
+	}
+	found := false
+	for _, d := range deltas {
+		if d.Path == "overlays/code/files/new-file.md.tmpl" && d.Kind == "added" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected 'added' delta for new-file.md.tmpl, got: %v", deltas)
+	}
+}
+
+func TestSelfReviewDoesNotCreateACOrProposalFiles(t *testing.T) {
+	t.Parallel()
+	root := repoRoot(t)
+	docsDir := filepath.Join(root, "docs")
+	beforeACs, _ := filepath.Glob(filepath.Join(docsDir, "ac*.md"))
+	_, err := RunSelfReview(templates.EmbeddedFS, templates.EmbeddedFS, templates.TemplateVersion)
+	if err != nil {
+		t.Fatalf("RunSelfReview() error = %v", err)
+	}
+	afterACs, _ := filepath.Glob(filepath.Join(docsDir, "ac*.md"))
+	if len(afterACs) != len(beforeACs) {
+		t.Fatalf("self-review created AC files: before=%d after=%d", len(beforeACs), len(afterACs))
+	}
+
+	// Check no .template-proposed files were created anywhere under internal/templates/.
+	templateDir := filepath.Join(root, "internal", "templates")
+	err = filepath.WalkDir(templateDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !d.IsDir() && strings.Contains(d.Name(), ".template-proposed") {
+			t.Errorf("self-review created proposal file: %s", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk template dir: %v", err)
+	}
+}
+
+func TestCmdBootstrapDirectoryRemoved(t *testing.T) {
+	t.Parallel()
+	root := repoRoot(t)
+	if _, err := os.Stat(filepath.Join(root, "cmd", "bootstrap")); err == nil {
+		t.Fatal("cmd/bootstrap/ still exists; should have been removed")
+	}
+}
+
+func TestScriptOnlyCommandsDoesNotContainBootstrap(t *testing.T) {
+	t.Parallel()
+	root := repoRoot(t)
+	content, err := os.ReadFile(filepath.Join(root, "internal", "buildtool", "buildtool.go"))
+	if err != nil {
+		t.Fatalf("read buildtool.go: %v", err)
+	}
+	if strings.Contains(string(content), `"bootstrap"`) {
+		t.Fatal("buildtool.go scriptOnlyCommands still contains \"bootstrap\"")
+	}
+}
+
+func TestEnhanceMappingDoesNotReferenceCmdBootstrap(t *testing.T) {
+	t.Parallel()
+	root := repoRoot(t)
+	content, err := os.ReadFile(filepath.Join(root, "internal", "bootstrap", "bootstrap.go"))
+	if err != nil {
+		t.Fatalf("read bootstrap.go: %v", err)
+	}
+	if strings.Contains(string(content), `"cmd/bootstrap`) {
+		t.Fatal("bootstrap.go enhance mappings still reference cmd/bootstrap")
 	}
 }
