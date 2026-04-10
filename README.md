@@ -1,6 +1,6 @@
 # repokit
 
-Template repo for generating governed repositories from:
+Template repo that bootstraps and adopts governed repositories, and maintains itself through enhance mode. Built from:
 
 - a common base contract in `base/`
 - a repo-type overlay in `overlays/code/` or `overlays/doc/`
@@ -57,12 +57,13 @@ go run <template-root>/cmd/bootstrap --help
 
 ## Intended Use
 
-This repo is a reference frame used from inside a target working directory.
-
-Three modes are supported:
+Two consumer modes run from a target repo or empty target directory:
 
 - `new`: bootstrap an empty or near-empty folder into a governed `CODE` or `DOC` repo
 - `adopt`: apply the methodology to an existing repo with conservative proposal behavior, fit assessment, and section-level patching for `AGENTS.md`
+
+One template-maintenance mode run from inside this repo:
+
 - `enhance`: inspect another governed repo for portable methodology improvements and create an AC doc for the highest-priority actionable candidate
 
 ## Operating Model
@@ -72,7 +73,7 @@ The template repo is read-only at bootstrap time and is not imported as a submod
 
 The bootstrap tool is Go-based so the template works across macOS, Linux, and Windows without requiring a specific shell.
 
-The flow is:
+The `new`/`adopt` flow:
 
 1. user opens a coding agent in the target directory
 2. user gives the agent the absolute path to this template repo
@@ -83,17 +84,19 @@ The flow is:
 7. agent writes concrete files into the target repo
 8. generated repo records its template marker and becomes independently managed
 
+`enhance` inverts the direction: it runs from inside this repo, takes a reference path to another governed repo, and proposes improvements back into the template. It is the only mode intended to modify this repo itself.
+
 ## Operator Guide
 
 Use `new` when the target directory is empty or nearly empty and you want a full rendered baseline.
 
 Use `adopt` when the target repo already exists and you want conservative behavior: fit assessment, proposal files instead of overwrites, and section-level patching for `AGENTS.md` that adds only missing governed sections.
 
-Use `enhance` only from inside this template repo to inspect another governed repo for portable improvements. Enhance compares at the constraint level for governance sections and per-section for structured markdown files. When a `.repokit-manifest` exists in the reference repo, enhance uses three-way comparison to distinguish user customizations from stale template content. With `--apply`, it writes `.template-proposed` files for assisted merge. No template files are overwritten automatically.
+Use `enhance` only from inside this repo. It is the only mode that runs from repokit itself and the only mode that can propose changes back into the template. Enhance inspects another governed repo by reference path, comparing at the constraint level for governance sections and per-section for structured markdown files. When a `.repokit-manifest` exists in the reference repo, enhance uses three-way comparison to distinguish user customizations from stale template content. With `--apply`, it writes `.template-proposed` files for assisted merge. No template files are overwritten automatically.
 
 ## Self-Hosting Status
 
-This repo carries the core `CODE`-repo artifacts at the root:
+This repo is itself governed as a `CODE` repo and carries the core artifacts at the root:
 
 - [`AGENTS.md`](AGENTS.md)
 - [`arch.md`](arch.md)
@@ -101,8 +104,6 @@ This repo carries the core `CODE`-repo artifacts at the root:
 - [`CHANGELOG.md`](CHANGELOG.md)
 - [`docs/README.md`](docs/README.md)
 - [`docs/agent-roles/`](docs/agent-roles/)
-
-The template repo is governed as a `CODE` repo and uses `enhance` for self-maintenance.
 
 ## Rendered Examples
 
