@@ -26,5 +26,6 @@ This repo uses an acceptance-criteria-first workflow.
 - keep architecture changes in `arch.md`
 - keep repo-level governance in `AGENTS.md`
 - record loose, pre-rubric follow-on ideas in `plan.md` under `Ideas To Explore` with an `IE<N>:` prefix
+- remove IE entries when promoted to an AC or completed; the list is staging, not history
 - record rubric-cleared follow-on work in `plan.md` under `Priorities`
 - promotion path: IE entry → discussion → Objective-Fit Rubric → `Priorities` → AC

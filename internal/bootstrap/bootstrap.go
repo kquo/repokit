@@ -328,6 +328,7 @@ func runNewOrAdopt(root string, cfg Config, adopt bool) error {
 	var ops []operation
 	if adopt {
 		ops = compactOperations(applyAdoptTransforms(canonical))
+		emitAdoptAdvisories(targetAbs)
 	} else {
 		ops = compactOperations(canonical)
 	}
@@ -1733,6 +1734,23 @@ func proposeIfExists(op operation) operation {
 		op.note = op.note + "; existing target preserved"
 	}
 	return op
+}
+
+// readmeMissingWhySection returns true if the target directory contains a
+// README.md that does not have a ## Why section. Returns false if README.md
+// is absent (template will generate one with the section).
+func readmeMissingWhySection(targetDir string) bool {
+	content, err := os.ReadFile(filepath.Join(targetDir, "README.md"))
+	if err != nil {
+		return false
+	}
+	return !strings.Contains(string(content), "## Why")
+}
+
+func emitAdoptAdvisories(targetDir string) {
+	if readmeMissingWhySection(targetDir) {
+		fmt.Printf("  %s existing README.md has no ## Why section (see template for guidance)\n", color.Yel("advisory:"))
+	}
 }
 
 func skipIfExists(op operation) operation {

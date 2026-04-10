@@ -24,14 +24,12 @@ Every new roadmap item should answer:
 
 ## Ideas To Explore
 
-Pre-rubric ideas captured for future discussion. Prefix each with `IE<N>:` (sequential N) for stable references. These are not commitments and have not passed the Objective-Fit Rubric. Remove items that are no longer interesting; this section should not grow indefinitely.
+Pre-rubric ideas captured for future discussion. Prefix each with `IE<N>:` (sequential N) for stable references. These are not commitments and have not passed the Objective-Fit Rubric. Remove entries when promoted to an AC, completed, or no longer interesting; this section is pre-rubric staging, not a historical record.
 
 - IE1: non-git target support: bootstrap into directories that are not git repos, for security/privacy use cases where git may be added later or never
 - IE2: optional LLM assistance in enhance: evaluate additive LLM roles (candidate summarization, rationale drafting, second-opinion review) on top of the deterministic core; deterministic logic stays as the enforcement layer, LLM output is informational only and opt-in
 - IE3: Let's evaluate /Users/tek1/code/skouts's ac-template.md, to maybe have repokit mimic its richer formatting and structure, and then adopt them
 - IE4: Aside from ac-template.md, what else can repokit adopt from skout repo?
-- IE5: explicit ## Why section for governed repos: evaluate making a short project-justification section part of the baseline repo contract, required in new mode and reviewed/criticized in adopt mode because it anchors human-agent collaboration
-  around the repo’s reason to exist
 - IE6: repokit as a first-class CLI utility: evaluate shipping repokit as an installable command that agents can invoke directly for bootstrap/adopt/enhance recommendations, using the repo as the deterministic source of truth and reducing human
   error around manual go run invocation
 

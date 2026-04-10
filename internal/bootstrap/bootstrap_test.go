@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -2982,7 +2983,7 @@ func TestPlanMdHasIdeasToExploreSection(t *testing.T) {
 	if !strings.Contains(content, "Pre-rubric ideas captured for future discussion") {
 		t.Fatal("plan.md: Ideas To Explore preamble missing")
 	}
-	if !strings.Contains(content, "should not grow indefinitely") {
+	if !strings.Contains(content, "pre-rubric staging, not a historical record") {
 		t.Fatal("plan.md: pruning guidance missing")
 	}
 }
@@ -3161,7 +3162,7 @@ func TestIdeasToExploreIEPrefix(t *testing.T) {
 		}
 	}
 
-	// Development cycle docs must reference IE prefix
+	// Development cycle docs must reference IE prefix and cleanup rule
 	for _, path := range []string{
 		"docs/development-cycle.md",
 		"overlays/code/files/docs/development-cycle.md.tmpl",
@@ -3174,5 +3175,123 @@ func TestIdeasToExploreIEPrefix(t *testing.T) {
 		if !strings.Contains(c, "IE entry") {
 			t.Errorf("%s: promotion path should reference IE entries", path)
 		}
+		if !strings.Contains(c, "remove IE entries when promoted") {
+			t.Errorf("%s: should state the IE cleanup rule (remove when promoted or completed)", path)
+		}
+	}
+
+	// Plan.md preambles must state the cleanup rule
+	for _, path := range []string{
+		"plan.md",
+		"overlays/code/files/plan.md.tmpl",
+		"examples/code/plan.md",
+	} {
+		c := readRepoFile(t, path)
+		if !strings.Contains(c, "pre-rubric staging, not a historical record") {
+			t.Errorf("%s: Ideas To Explore preamble should state that the list is staging, not history", path)
+		}
+	}
+
+	// Self-hosted plan.md should not contain completed IE5
+	if strings.Contains(content, "IE5:") {
+		t.Error("plan.md: IE5 was completed and should be removed")
+	}
+}
+
+func TestWhySectionInReadmeTemplates(t *testing.T) {
+	t.Parallel()
+	files := map[string]string{
+		"overlays/code/files/README.md.tmpl": "CODE template",
+		"overlays/doc/files/README.md.tmpl":  "DOC template",
+		"examples/code/README.md":            "CODE rendered example",
+		"examples/doc/README.md":             "DOC rendered example",
+	}
+	for path, label := range files {
+		content := readRepoFile(t, path)
+		whyIdx := strings.Index(content, "## Why")
+		overviewIdx := strings.Index(content, "## Overview")
+		if whyIdx < 0 {
+			t.Errorf("%s: %s must contain ## Why section", path, label)
+			continue
+		}
+		if overviewIdx < 0 {
+			t.Errorf("%s: %s must contain ## Overview section", path, label)
+			continue
+		}
+		if whyIdx >= overviewIdx {
+			t.Errorf("%s: ## Why (at %d) must come before ## Overview (at %d)", path, whyIdx, overviewIdx)
+		}
+	}
+}
+
+func TestReadmeMissingWhySection(t *testing.T) {
+	t.Parallel()
+
+	t.Run("missing why", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		mustWrite(t, filepath.Join(dir, "README.md"), "# My Project\n\n## Overview\n\nSome content.\n")
+		if !readmeMissingWhySection(dir) {
+			t.Error("expected true for README without ## Why")
+		}
+	})
+
+	t.Run("has why", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		mustWrite(t, filepath.Join(dir, "README.md"), "# My Project\n\n## Why\n\nBecause reasons.\n\n## Overview\n")
+		if readmeMissingWhySection(dir) {
+			t.Error("expected false for README with ## Why")
+		}
+	})
+
+	t.Run("no readme", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		if readmeMissingWhySection(dir) {
+			t.Error("expected false when README.md does not exist")
+		}
+	})
+}
+
+func TestAdoptEmitsWhyAdvisory(t *testing.T) {
+	// Not parallel: captures os.Stdout via pipe and uses repoRoot as template source.
+	root := repoRoot(t)
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "README.md"), "# Existing\n\n## Overview\n\nNo why section.\n")
+	mustWrite(t, filepath.Join(dir, "go.mod"), "module example\n")
+
+	cfg := Config{
+		Mode:     ModeAdopt,
+		Target:   dir,
+		Type:     RepoTypeCode,
+		RepoName: "test-adopt",
+		Purpose:  "test purpose",
+		Stack:    "Go",
+		DryRun:   true,
+	}
+
+	// Capture stdout from the full adopt path.
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error = %v", err)
+	}
+	os.Stdout = w
+	if err := runNewOrAdopt(root, cfg, true); err != nil {
+		w.Close()
+		os.Stdout = oldStdout
+		t.Fatalf("runNewOrAdopt() error = %v", err)
+	}
+	w.Close()
+	os.Stdout = oldStdout
+
+	captured, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("reading captured output: %v", err)
+	}
+	output := string(captured)
+	if !strings.Contains(output, "advisory:") || !strings.Contains(output, "## Why") {
+		t.Errorf("expected adopt advisory about missing ## Why in full adopt path output, got: %q", output)
 	}
 }

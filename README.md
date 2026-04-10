@@ -1,4 +1,4 @@
-# repokit
+s# repokit
 Template repo that bootstraps and adopts governed repositories, and maintains itself through enhance mode. Built from:
 
 - a common base contract in `base/`
@@ -6,9 +6,7 @@ Template repo that bootstraps and adopts governed repositories, and maintains it
 - a deterministic Go bootstrap command that renders concrete files into a target repo
 
 ## Why
-Most AI-assisted repo work fails not because the model is weak, but because the collaboration contract is implicit, inconsistent, and hard to reproduce. `repokit` exists to make that contract explicit by providing a governance and workflow template for deterministic human-AI project collaboration.
-
-It gives a repo a stable structure for how work is proposed, reviewed, documented, and maintained, so the human and the agent are operating from the same visible rules instead of hidden session context. The goal is not more process for its own sake; it is less coordination drift, less prompt-only memory, and more repeatable project maintenance.
+Most AI-assisted repository work fails not due to model limits, but because the collaboration contract is implicit, inconsistent, and non-reproducible. **repokit** makes this contract explicit by defining a governance and workflow framework for deterministic human–AI collaboration. It provides a stable, versioned structure for proposing, reviewing, documenting, and maintaining work, ensuring both human and agent follow the same transparent rules instead of transient session context. The goal is not more process, but less coordination drift, reduced prompt-bound state, and more repeatable project outcomes.
 
 ## Modes
 

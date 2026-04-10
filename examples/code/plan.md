@@ -23,7 +23,7 @@ Every new roadmap item should answer:
 
 ## Ideas To Explore
 
-Pre-rubric ideas captured for future discussion. Prefix each with `IE<N>:` (sequential N) for stable references. These are not commitments and have not passed the Objective-Fit Rubric. Remove items that are no longer interesting; this section should not grow indefinitely.
+Pre-rubric ideas captured for future discussion. Prefix each with `IE<N>:` (sequential N) for stable references. These are not commitments and have not passed the Objective-Fit Rubric. Remove entries when promoted to an AC, completed, or no longer interesting; this section is pre-rubric staging, not a historical record.
 
 ## Deferred
 
