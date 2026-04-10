@@ -2,8 +2,10 @@ package bootstrap
 
 import (
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"repokit/internal/templates"
 	"strings"
 	"testing"
 )
@@ -186,7 +188,7 @@ Base purpose.
 - Update docs with behavior.
 `)
 
-	report, err := ReviewEnhancement(templateRoot, referenceRoot)
+	report, err := ReviewEnhancement(os.DirFS(templateRoot), templateRoot, referenceRoot)
 	if err != nil {
 		t.Fatalf("ReviewEnhancement() error = %v", err)
 	}
@@ -291,7 +293,7 @@ Base purpose.
 - Update docs with behavior.
 `)
 
-	report, err := ReviewEnhancement(templateRoot, referenceRoot)
+	report, err := ReviewEnhancement(os.DirFS(templateRoot), templateRoot, referenceRoot)
 	if err != nil {
 		t.Fatalf("ReviewEnhancement() error = %v", err)
 	}
@@ -315,7 +317,7 @@ func TestReviewEnhancementDefersProjectSpecificFiles(t *testing.T) {
 	mustWrite(t, filepath.Join(templateRoot, "overlays", "code", "files", "README.md.tmpl"), "# {{REPO_NAME}}\n")
 	mustWrite(t, filepath.Join(referenceRoot, "README.md"), "# skout\n\nThis repo keeps skout-specific release notes.\n")
 
-	report, err := ReviewEnhancement(templateRoot, referenceRoot)
+	report, err := ReviewEnhancement(os.DirFS(templateRoot), templateRoot, referenceRoot)
 	if err != nil {
 		t.Fatalf("ReviewEnhancement() error = %v", err)
 	}
@@ -573,7 +575,7 @@ func TestRunEnhanceNoActionableCandidatesCreatesNoFile(t *testing.T) {
 	mustWrite(t, filepath.Join(referenceRoot, "AGENTS.md"), "# AGENTS.md\n\n## Purpose\n\nBase purpose.\n")
 
 	cfg := Config{Mode: ModeEnhance, Reference: referenceRoot}
-	if err := RunEnhance(templateRoot, cfg); err != nil {
+	if err := RunEnhance(os.DirFS(templateRoot), templateRoot, cfg); err != nil {
 		t.Fatalf("RunEnhance() error = %v", err)
 	}
 
@@ -618,7 +620,7 @@ Base purpose.
 `)
 
 	cfg := Config{Mode: ModeEnhance, Reference: referenceRoot}
-	if err := RunEnhance(templateRoot, cfg); err != nil {
+	if err := RunEnhance(os.DirFS(templateRoot), templateRoot, cfg); err != nil {
 		t.Fatalf("RunEnhance() error = %v", err)
 	}
 
@@ -684,7 +686,7 @@ Base purpose.
 	mustWrite(t, filepath.Join(referenceRoot, "README.md"), "# Different README\n")
 
 	cfg := Config{Mode: ModeEnhance, Reference: referenceRoot}
-	if err := RunEnhance(templateRoot, cfg); err != nil {
+	if err := RunEnhance(os.DirFS(templateRoot), templateRoot, cfg); err != nil {
 		t.Fatalf("RunEnhance() error = %v", err)
 	}
 
@@ -741,7 +743,7 @@ Base purpose.
 `)
 
 	cfg := Config{Mode: ModeEnhance, Reference: referenceRoot, DryRun: true}
-	if err := RunEnhance(templateRoot, cfg); err != nil {
+	if err := RunEnhance(os.DirFS(templateRoot), templateRoot, cfg); err != nil {
 		t.Fatalf("RunEnhance() error = %v", err)
 	}
 
@@ -1008,7 +1010,7 @@ func TestReadAndRender(t *testing.T) {
 	path := filepath.Join(dir, "template.md")
 	mustWrite(t, path, "# {{REPO_NAME}}\n\nPurpose: {{PROJECT_PURPOSE}}\nStack: {{STACK_OR_PLATFORM}}\n")
 
-	result, err := readAndRender(path, map[string]string{
+	result, err := readAndRender(os.DirFS(dir), "template.md", map[string]string{
 		"{{REPO_NAME}}":         "my-repo",
 		"{{PROJECT_PURPOSE}}":   "test purpose",
 		"{{STACK_OR_PLATFORM}}": "Go CLI",
@@ -1029,7 +1031,7 @@ func TestReadAndRender(t *testing.T) {
 
 func TestReadAndRenderMissingFile(t *testing.T) {
 	t.Parallel()
-	_, err := readAndRender("/nonexistent/file.md", nil)
+	_, err := readAndRender(os.DirFS(t.TempDir()), "nonexistent/file.md", nil)
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
@@ -1261,7 +1263,7 @@ func TestPlanRenderCodeOverlay(t *testing.T) {
 		Stack:    "Go CLI",
 	}
 
-	ops, err := planRender(root, cfg, targetRoot, false)
+	ops, err := planRender(os.DirFS(root), root, cfg, targetRoot, false)
 	if err != nil {
 		t.Fatalf("planRender() error = %v", err)
 	}
@@ -1305,7 +1307,7 @@ func TestPlanRenderAdoptProposesExistingFiles(t *testing.T) {
 		Stack:    "Go CLI",
 	}
 
-	ops, err := planRender(root, cfg, targetRoot, true)
+	ops, err := planRender(os.DirFS(root), root, cfg, targetRoot, true)
 	if err != nil {
 		t.Fatalf("planRender() error = %v", err)
 	}
@@ -1342,7 +1344,7 @@ func TestPlanRenderNonGoStackSkipsGoFiles(t *testing.T) {
 		Stack:    "Rust service",
 	}
 
-	ops, err := planRender(root, cfg, targetRoot, false)
+	ops, err := planRender(os.DirFS(root), root, cfg, targetRoot, false)
 	if err != nil {
 		t.Fatalf("planRender() error = %v", err)
 	}
@@ -1512,7 +1514,7 @@ Base purpose.
 - Update docs with behavior.
 `)
 
-	report, err := ReviewEnhancement(templateRoot, referenceRoot)
+	report, err := ReviewEnhancement(os.DirFS(templateRoot), templateRoot, referenceRoot)
 	if err != nil {
 		t.Fatalf("ReviewEnhancement() error = %v", err)
 	}
@@ -1594,7 +1596,7 @@ func TestReviewMappedFilePopulatesDeltaSections(t *testing.T) {
 		ReferencePaths: []string{"docs/arch.md"},
 		TemplateTarget: filepath.Join("overlays", "code", "files", "docs", "arch.md.tmpl"),
 	}
-	candidate, ok, err := reviewMappedFile(templateRoot, referenceRoot, item, nil)
+	candidate, ok, err := reviewMappedFile(os.DirFS(templateRoot), templateRoot, referenceRoot, item, nil)
 	if err != nil {
 		t.Fatalf("reviewMappedFile() error = %v", err)
 	}
@@ -1620,7 +1622,7 @@ func TestReviewMappedFileNoDeltaSectionsForUnstructured(t *testing.T) {
 		ReferencePaths: []string{"TEMPLATE_VERSION"},
 		TemplateTarget: "TEMPLATE_VERSION",
 	}
-	candidate, ok, err := reviewMappedFile(templateRoot, referenceRoot, item, nil)
+	candidate, ok, err := reviewMappedFile(os.DirFS(templateRoot), templateRoot, referenceRoot, item, nil)
 	if err != nil {
 		t.Fatalf("reviewMappedFile() error = %v", err)
 	}
@@ -1722,7 +1724,7 @@ func TestBootstrapNewWritesManifest(t *testing.T) {
 		Purpose:  "test purpose",
 		Stack:    "Go CLI",
 	}
-	if err := runNewOrAdopt(templateRoot, cfg, false); err != nil {
+	if err := runNewOrAdopt(templates.DiskFS(templateRoot), templateRoot, cfg, false); err != nil {
 		t.Fatalf("runNewOrAdopt() error = %v", err)
 	}
 
@@ -1769,7 +1771,7 @@ func TestBootstrapAdoptWritesManifestWithCanonicalChecksums(t *testing.T) {
 		Purpose:  "test purpose",
 		Stack:    "Go CLI",
 	}
-	if err := runNewOrAdopt(templateRoot, cfg, true); err != nil {
+	if err := runNewOrAdopt(templates.DiskFS(templateRoot), templateRoot, cfg, true); err != nil {
 		t.Fatalf("runNewOrAdopt() error = %v", err)
 	}
 
@@ -1838,7 +1840,7 @@ func TestEnhanceWithManifestUserChangeOnly(t *testing.T) {
 		},
 	})
 
-	report, err := ReviewEnhancement(templateRoot, referenceRoot)
+	report, err := ReviewEnhancement(os.DirFS(templateRoot), templateRoot, referenceRoot)
 	if err != nil {
 		t.Fatalf("ReviewEnhancement() error = %v", err)
 	}
@@ -1888,7 +1890,7 @@ func TestEnhanceWithManifestTemplateChangeOnly(t *testing.T) {
 		},
 	})
 
-	report, err := ReviewEnhancement(templateRoot, referenceRoot)
+	report, err := ReviewEnhancement(os.DirFS(templateRoot), templateRoot, referenceRoot)
 	if err != nil {
 		t.Fatalf("ReviewEnhancement() error = %v", err)
 	}
@@ -1926,7 +1928,7 @@ func TestEnhanceWithManifestBothChanged(t *testing.T) {
 		},
 	})
 
-	report, err := ReviewEnhancement(templateRoot, referenceRoot)
+	report, err := ReviewEnhancement(os.DirFS(templateRoot), templateRoot, referenceRoot)
 	if err != nil {
 		t.Fatalf("ReviewEnhancement() error = %v", err)
 	}
@@ -1967,7 +1969,7 @@ func TestEnhanceWithManifestNeitherChanged(t *testing.T) {
 		},
 	})
 
-	report, err := ReviewEnhancement(templateRoot, referenceRoot)
+	report, err := ReviewEnhancement(os.DirFS(templateRoot), templateRoot, referenceRoot)
 	if err != nil {
 		t.Fatalf("ReviewEnhancement() error = %v", err)
 	}
@@ -1992,7 +1994,7 @@ func TestEnhanceWithoutManifestFallback(t *testing.T) {
 	mustWrite(t, filepath.Join(referenceRoot, "AGENTS.md"), "# AGENTS.md\n\n## Purpose\n\nBase purpose.\n\n## Interaction Mode\n\n- Default rule.\n- Extra user rule.\n")
 
 	// No manifest file → two-way fallback
-	report, err := ReviewEnhancement(templateRoot, referenceRoot)
+	report, err := ReviewEnhancement(os.DirFS(templateRoot), templateRoot, referenceRoot)
 	if err != nil {
 		t.Fatalf("ReviewEnhancement() error = %v", err)
 	}
@@ -2033,7 +2035,7 @@ func TestEnhanceMappedFileTemplateOnlyDeferred(t *testing.T) {
 		ReferencePaths: []string{"README.md"},
 		TemplateTarget: filepath.Join("overlays", "code", "files", "README.md.tmpl"),
 	}
-	candidate, ok, err := reviewMappedFile(templateRoot, referenceRoot, item, mmap)
+	candidate, ok, err := reviewMappedFile(os.DirFS(templateRoot), templateRoot, referenceRoot, item, mmap)
 	if err != nil {
 		t.Fatalf("reviewMappedFile() error = %v", err)
 	}
@@ -2274,7 +2276,7 @@ func TestRunEnhanceApplyWritesProposal(t *testing.T) {
 	templateRoot, referenceRoot := setupEnhanceFixture(t)
 
 	cfg := Config{Mode: ModeEnhance, Reference: referenceRoot, Apply: true}
-	if err := RunEnhance(templateRoot, cfg); err != nil {
+	if err := RunEnhance(os.DirFS(templateRoot), templateRoot, cfg); err != nil {
 		t.Fatalf("RunEnhance() error = %v", err)
 	}
 
@@ -2285,7 +2287,7 @@ func TestRunEnhanceApplyWritesProposal(t *testing.T) {
 	}
 
 	// Proposal should exist for AGENTS.md
-	proposal := proposalPath(filepath.Join(templateRoot, "base", "AGENTS.md"))
+	proposal := proposalPath(filepath.Join(templates.DirPath(templateRoot), "base", "AGENTS.md"))
 	if _, err := os.Stat(proposal); err != nil {
 		t.Fatalf("expected proposal file at %s, got error: %v", proposal, err)
 	}
@@ -2301,7 +2303,7 @@ func TestRunEnhanceApplyStillCreatesACDoc(t *testing.T) {
 	templateRoot, referenceRoot := setupEnhanceFixture(t)
 
 	cfg := Config{Mode: ModeEnhance, Reference: referenceRoot, Apply: true}
-	if err := RunEnhance(templateRoot, cfg); err != nil {
+	if err := RunEnhance(os.DirFS(templateRoot), templateRoot, cfg); err != nil {
 		t.Fatalf("RunEnhance() error = %v", err)
 	}
 
@@ -2326,12 +2328,12 @@ func TestRunEnhanceApplyNewTargetStillWritesProposal(t *testing.T) {
 	mustWrite(t, filepath.Join(referenceRoot, "AGENTS.md"), "# AGENTS.md\n\n## Purpose\n\nBase purpose.\n\n## Interaction Mode\n\n- Default to discussion first.\n- New constraint.\n")
 
 	cfg := Config{Mode: ModeEnhance, Reference: referenceRoot, Apply: true}
-	if err := RunEnhance(templateRoot, cfg); err != nil {
+	if err := RunEnhance(os.DirFS(templateRoot), templateRoot, cfg); err != nil {
 		t.Fatalf("RunEnhance() error = %v", err)
 	}
 
 	// Even though base/AGENTS.md exists, proposal should be at the proposal path, not overwriting
-	proposal := proposalPath(filepath.Join(templateRoot, "base", "AGENTS.md"))
+	proposal := proposalPath(filepath.Join(templates.DirPath(templateRoot), "base", "AGENTS.md"))
 	if _, err := os.Stat(proposal); err != nil {
 		t.Fatalf("expected proposal file, got error: %v", err)
 	}
@@ -2347,7 +2349,7 @@ func TestRunEnhanceApplyDryRunWritesNothing(t *testing.T) {
 	templateRoot, referenceRoot := setupEnhanceFixture(t)
 
 	cfg := Config{Mode: ModeEnhance, Reference: referenceRoot, Apply: true, DryRun: true}
-	if err := RunEnhance(templateRoot, cfg); err != nil {
+	if err := RunEnhance(os.DirFS(templateRoot), templateRoot, cfg); err != nil {
 		t.Fatalf("RunEnhance() error = %v", err)
 	}
 
@@ -2358,7 +2360,7 @@ func TestRunEnhanceApplyDryRunWritesNothing(t *testing.T) {
 	}
 
 	// No proposal files
-	proposal := proposalPath(filepath.Join(templateRoot, "base", "AGENTS.md"))
+	proposal := proposalPath(filepath.Join(templates.DirPath(templateRoot), "base", "AGENTS.md"))
 	if _, err := os.Stat(proposal); err == nil {
 		t.Fatal("dry-run should not create proposal files")
 	}
@@ -2380,12 +2382,12 @@ func TestRunEnhanceWithoutApplyNoProposals(t *testing.T) {
 	templateRoot, referenceRoot := setupEnhanceFixture(t)
 
 	cfg := Config{Mode: ModeEnhance, Reference: referenceRoot}
-	if err := RunEnhance(templateRoot, cfg); err != nil {
+	if err := RunEnhance(os.DirFS(templateRoot), templateRoot, cfg); err != nil {
 		t.Fatalf("RunEnhance() error = %v", err)
 	}
 
 	// Should create AC doc but no proposals
-	proposal := proposalPath(filepath.Join(templateRoot, "base", "AGENTS.md"))
+	proposal := proposalPath(filepath.Join(templates.DirPath(templateRoot), "base", "AGENTS.md"))
 	if _, err := os.Stat(proposal); err == nil {
 		t.Fatal("enhance without --apply should not create proposal files")
 	}
@@ -2396,11 +2398,11 @@ func TestRunEnhanceApplyGovernanceProposesWholeFile(t *testing.T) {
 	templateRoot, referenceRoot := setupEnhanceFixture(t)
 
 	cfg := Config{Mode: ModeEnhance, Reference: referenceRoot, Apply: true}
-	if err := RunEnhance(templateRoot, cfg); err != nil {
+	if err := RunEnhance(os.DirFS(templateRoot), templateRoot, cfg); err != nil {
 		t.Fatalf("RunEnhance() error = %v", err)
 	}
 
-	proposal := proposalPath(filepath.Join(templateRoot, "base", "AGENTS.md"))
+	proposal := proposalPath(filepath.Join(templates.DirPath(templateRoot), "base", "AGENTS.md"))
 	content, err := os.ReadFile(proposal)
 	if err != nil {
 		t.Fatalf("expected governance proposal, got error: %v", err)
@@ -2540,7 +2542,7 @@ func TestAdoptPatchesMissingSections(t *testing.T) {
 		Purpose:  "test purpose",
 		Stack:    "Go CLI",
 	}
-	if err := runNewOrAdopt(templateRoot, cfg, true); err != nil {
+	if err := runNewOrAdopt(templates.DiskFS(templateRoot), templateRoot, cfg, true); err != nil {
 		t.Fatalf("runNewOrAdopt() error = %v", err)
 	}
 
@@ -2571,7 +2573,7 @@ func TestAdoptSkipsWhenAllSectionsPresent(t *testing.T) {
 	targetDir := t.TempDir()
 
 	// Read the template AGENTS.md to get all governed sections
-	templateAgents, _ := os.ReadFile(filepath.Join(templateRoot, "base", "AGENTS.md"))
+	templateAgents, _ := os.ReadFile(filepath.Join(templateRoot, "internal", "templates", "base", "AGENTS.md"))
 	mustWrite(t, filepath.Join(targetDir, "AGENTS.md"), string(templateAgents))
 
 	cfg := Config{
@@ -2582,7 +2584,7 @@ func TestAdoptSkipsWhenAllSectionsPresent(t *testing.T) {
 		Purpose:  "test purpose",
 		Stack:    "Go CLI",
 	}
-	if err := runNewOrAdopt(templateRoot, cfg, true); err != nil {
+	if err := runNewOrAdopt(templates.DiskFS(templateRoot), templateRoot, cfg, true); err != nil {
 		t.Fatalf("runNewOrAdopt() error = %v", err)
 	}
 
@@ -2607,7 +2609,7 @@ func TestAdoptNoExistingAgentsWritesDirectly(t *testing.T) {
 		Purpose:  "test purpose",
 		Stack:    "Go CLI",
 	}
-	if err := runNewOrAdopt(templateRoot, cfg, true); err != nil {
+	if err := runNewOrAdopt(templates.DiskFS(templateRoot), templateRoot, cfg, true); err != nil {
 		t.Fatalf("runNewOrAdopt() error = %v", err)
 	}
 
@@ -2642,7 +2644,7 @@ func TestBootstrapNewProducesAgentRoles(t *testing.T) {
 		Purpose:  "test purpose",
 		Stack:    "Go CLI",
 	}
-	if err := runNewOrAdopt(templateRoot, cfg, false); err != nil {
+	if err := runNewOrAdopt(templates.DiskFS(templateRoot), templateRoot, cfg, false); err != nil {
 		t.Fatalf("runNewOrAdopt() error = %v", err)
 	}
 
@@ -2699,7 +2701,7 @@ func TestBootstrapAdoptProposesAgentRoles(t *testing.T) {
 		Purpose:  "test purpose",
 		Stack:    "Go CLI",
 	}
-	if err := runNewOrAdopt(templateRoot, cfg, true); err != nil {
+	if err := runNewOrAdopt(templates.DiskFS(templateRoot), templateRoot, cfg, true); err != nil {
 		t.Fatalf("runNewOrAdopt() error = %v", err)
 	}
 
@@ -2739,7 +2741,7 @@ func TestBootstrapNewProducesEnrichedDocs(t *testing.T) {
 		Purpose:  "test purpose",
 		Stack:    "Go CLI",
 	}
-	if err := runNewOrAdopt(templateRoot, cfg, false); err != nil {
+	if err := runNewOrAdopt(templates.DiskFS(templateRoot), templateRoot, cfg, false); err != nil {
 		t.Fatalf("runNewOrAdopt() error = %v", err)
 	}
 
@@ -2786,7 +2788,7 @@ func TestBootstrapAdoptProposesEnrichedDocs(t *testing.T) {
 		Purpose:  "test purpose",
 		Stack:    "Go CLI",
 	}
-	if err := runNewOrAdopt(templateRoot, cfg, true); err != nil {
+	if err := runNewOrAdopt(templates.DiskFS(templateRoot), templateRoot, cfg, true); err != nil {
 		t.Fatalf("runNewOrAdopt() error = %v", err)
 	}
 
@@ -2833,7 +2835,7 @@ func TestBootstrapNewDocProducesEnrichedFiles(t *testing.T) {
 		PublishingPlatform: "Hugo",
 		Style:              "concise",
 	}
-	if err := runNewOrAdopt(templateRoot, cfg, false); err != nil {
+	if err := runNewOrAdopt(templates.DiskFS(templateRoot), templateRoot, cfg, false); err != nil {
 		t.Fatalf("runNewOrAdopt() error = %v", err)
 	}
 
@@ -2892,7 +2894,7 @@ func TestBootstrapAdoptDocProposesEnrichedFiles(t *testing.T) {
 		PublishingPlatform: "Hugo",
 		Style:              "concise",
 	}
-	if err := runNewOrAdopt(templateRoot, cfg, true); err != nil {
+	if err := runNewOrAdopt(templates.DiskFS(templateRoot), templateRoot, cfg, true); err != nil {
 		t.Fatalf("runNewOrAdopt() error = %v", err)
 	}
 
@@ -3012,7 +3014,7 @@ func TestPlanMdNonGitItemMigratedToIdeas(t *testing.T) {
 
 func TestCodeOverlayPlanTemplateHasIdeasToExploreSection(t *testing.T) {
 	t.Parallel()
-	content := readRepoFile(t, "overlays/code/files/plan.md.tmpl")
+	content := readRepoFile(t, "internal/templates/overlays/code/files/plan.md.tmpl")
 	assertSectionOrdering(t, content, "overlays/code/files/plan.md.tmpl",
 		"## Priorities",
 		"## Ideas To Explore",
@@ -3040,7 +3042,7 @@ func TestDevelopmentCycleMentionsPriorities(t *testing.T) {
 	t.Parallel()
 	paths := []string{
 		"docs/development-cycle.md",
-		"overlays/code/files/docs/development-cycle.md.tmpl",
+		"internal/templates/overlays/code/files/docs/development-cycle.md.tmpl",
 		"examples/code/docs/development-cycle.md",
 	}
 	for _, path := range paths {
@@ -3062,8 +3064,8 @@ func TestACFilenameConventionSurfacedInDocs(t *testing.T) {
 	hintFiles := []string{
 		"docs/ac-template.md",
 		"docs/development-cycle.md",
-		"overlays/code/files/docs/ac-template.md.tmpl",
-		"overlays/code/files/docs/development-cycle.md.tmpl",
+		"internal/templates/overlays/code/files/docs/ac-template.md.tmpl",
+		"internal/templates/overlays/code/files/docs/development-cycle.md.tmpl",
 		"examples/code/docs/ac-template.md",
 		"examples/code/docs/development-cycle.md",
 	}
@@ -3078,7 +3080,7 @@ func TestACFilenameConventionSurfacedInDocs(t *testing.T) {
 func TestACDocsReadmeUsesCurrentConvention(t *testing.T) {
 	t.Parallel()
 	overlayReadmes := []string{
-		"overlays/code/files/docs/README.md.tmpl",
+		"internal/templates/overlays/code/files/docs/README.md.tmpl",
 		"examples/code/docs/README.md",
 	}
 	for _, path := range overlayReadmes {
@@ -3153,7 +3155,7 @@ func TestIdeasToExploreIEPrefix(t *testing.T) {
 
 	// Overlay template and rendered example must document the convention
 	for _, path := range []string{
-		"overlays/code/files/plan.md.tmpl",
+		"internal/templates/overlays/code/files/plan.md.tmpl",
 		"examples/code/plan.md",
 	} {
 		c := readRepoFile(t, path)
@@ -3165,7 +3167,7 @@ func TestIdeasToExploreIEPrefix(t *testing.T) {
 	// Development cycle docs must reference IE prefix and cleanup rule
 	for _, path := range []string{
 		"docs/development-cycle.md",
-		"overlays/code/files/docs/development-cycle.md.tmpl",
+		"internal/templates/overlays/code/files/docs/development-cycle.md.tmpl",
 		"examples/code/docs/development-cycle.md",
 	} {
 		c := readRepoFile(t, path)
@@ -3183,7 +3185,7 @@ func TestIdeasToExploreIEPrefix(t *testing.T) {
 	// Plan.md preambles must state the cleanup rule
 	for _, path := range []string{
 		"plan.md",
-		"overlays/code/files/plan.md.tmpl",
+		"internal/templates/overlays/code/files/plan.md.tmpl",
 		"examples/code/plan.md",
 	} {
 		c := readRepoFile(t, path)
@@ -3201,10 +3203,10 @@ func TestIdeasToExploreIEPrefix(t *testing.T) {
 func TestWhySectionInReadmeTemplates(t *testing.T) {
 	t.Parallel()
 	files := map[string]string{
-		"overlays/code/files/README.md.tmpl": "CODE template",
-		"overlays/doc/files/README.md.tmpl":  "DOC template",
-		"examples/code/README.md":            "CODE rendered example",
-		"examples/doc/README.md":             "DOC rendered example",
+		"internal/templates/overlays/code/files/README.md.tmpl": "CODE template",
+		"internal/templates/overlays/doc/files/README.md.tmpl":  "DOC template",
+		"examples/code/README.md":                               "CODE rendered example",
+		"examples/doc/README.md":                                "DOC rendered example",
 	}
 	for path, label := range files {
 		content := readRepoFile(t, path)
@@ -3278,7 +3280,7 @@ func TestAdoptEmitsWhyAdvisory(t *testing.T) {
 		t.Fatalf("os.Pipe() error = %v", err)
 	}
 	os.Stdout = w
-	if err := runNewOrAdopt(root, cfg, true); err != nil {
+	if err := runNewOrAdopt(templates.DiskFS(root), root, cfg, true); err != nil {
 		w.Close()
 		os.Stdout = oldStdout
 		t.Fatalf("runNewOrAdopt() error = %v", err)
@@ -3293,5 +3295,41 @@ func TestAdoptEmitsWhyAdvisory(t *testing.T) {
 	output := string(captured)
 	if !strings.Contains(output, "advisory:") || !strings.Contains(output, "## Why") {
 		t.Errorf("expected adopt advisory about missing ## Why in full adopt path output, got: %q", output)
+	}
+}
+
+func TestTemplatesDiskFSCanReadBaseAgents(t *testing.T) {
+	t.Parallel()
+	root := repoRoot(t)
+	tfs := templates.DiskFS(root)
+	content, err := fs.ReadFile(tfs, "base/AGENTS.md")
+	if err != nil {
+		t.Fatalf("templates.DiskFS cannot read base/AGENTS.md: %v", err)
+	}
+	if !strings.Contains(string(content), "## Purpose") {
+		t.Fatal("base/AGENTS.md missing expected ## Purpose section")
+	}
+}
+
+func TestOldTemplateDirectoriesRemoved(t *testing.T) {
+	t.Parallel()
+	root := repoRoot(t)
+	for _, dir := range []string{"base", "overlays"} {
+		path := filepath.Join(root, dir)
+		if _, err := os.Stat(path); err == nil {
+			t.Errorf("%s/ still exists at repo root; should have been moved to internal/templates/", dir)
+		}
+	}
+}
+
+func TestTemplateVersionAtRoot(t *testing.T) {
+	t.Parallel()
+	root := repoRoot(t)
+	content, err := os.ReadFile(filepath.Join(root, "TEMPLATE_VERSION"))
+	if err != nil {
+		t.Fatalf("TEMPLATE_VERSION must exist at repo root: %v", err)
+	}
+	if strings.TrimSpace(string(content)) == "" {
+		t.Fatal("TEMPLATE_VERSION at repo root must not be empty")
 	}
 }

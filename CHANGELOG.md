@@ -3,6 +3,7 @@
 | Version | Summary |
 |---------|---------|
 | Unreleased | |
+| 0.4.0 | AC18: templates moved to internal/templates/, bootstrap refactored to fs.FS abstraction |
 | 0.3.4 | AC17: ## Why section in generated READMEs, adopt advisory for missing Why, IE cleanup rule |
 | 0.3.3 | AC16: README consolidated — Quick Start, Intended Use, Operating Model, Operator Guide collapsed into Modes and Design |
 | 0.3.2 | AC15: AC filename convention surfaced in ac-template.md, development-cycle.md, and docs/README.md files (stale ac_<id> guidance corrected) |

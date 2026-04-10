@@ -1,7 +1,7 @@
 # Overlay Scope
 
 This document defines what belongs only in the `CODE` overlay versus only in the `DOC` overlay.
-Anything that applies to both belongs in [`base/AGENTS.md`](../base/AGENTS.md), not in an overlay.
+Anything that applies to both belongs in [`base/AGENTS.md`](../internal/templates/base/AGENTS.md), not in an overlay.
 
 ## Base Only
 

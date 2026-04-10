@@ -21,11 +21,11 @@ The repo also serves as its own `CODE`-repo example by carrying its own `AGENTS.
 
 ## Major Components
 
-- `base/`: cross-repo governance artifacts such as `AGENTS.md`
-- `overlays/`: concrete repo-type overlays for `CODE` and `DOC`
+- `internal/templates/base/`: cross-repo governance artifacts such as `AGENTS.md`
+- `internal/templates/overlays/`: concrete repo-type overlays for `CODE` and `DOC`
 - `cmd/bootstrap`: deterministic renderer for `new`, `adopt`, and `enhance`
 - `cmd/build` and `cmd/rel`: Go entrypoints for local validation and release
-- `internal/`: shared logic for bootstrap, build, release, and colorized CLI output
+- `internal/`: shared logic for bootstrap, build, release, colorized CLI output, and template access
 - `examples/`: rendered sample repos used to verify that output is concrete and usable
 
 ## Data And Control Flow

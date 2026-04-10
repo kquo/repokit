@@ -157,7 +157,7 @@ func TestBuildManifestFromOperations(t *testing.T) {
 		{kind: "symlink", path: filepath.Join(targetRoot, "CLAUDE.md"), linkTo: "AGENTS.md", source: filepath.Join("base", "AGENTS.md")},
 	}
 
-	m := buildManifest(ops, "0.1.5", templateRoot, targetRoot)
+	m := buildManifest(ops, "0.1.5", os.DirFS(templateRoot), templateRoot, targetRoot)
 	if m.TemplateVersion != "0.1.5" {
 		t.Fatalf("TemplateVersion = %q, want 0.1.5", m.TemplateVersion)
 	}

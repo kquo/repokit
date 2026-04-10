@@ -319,9 +319,9 @@ The manifest enables three-way comparison during enhance: by comparing the curre
 
 To support the workflow above, this repo should contain:
 
-- `base/` for cross-repo governance
-- `overlays/code/` for code-repo-specific files
-- `overlays/doc/` for doc-repo-specific files
+- `internal/templates/base/` for cross-repo governance
+- `internal/templates/overlays/code/` for code-repo-specific files
+- `internal/templates/overlays/doc/` for doc-repo-specific files
 - `cmd/bootstrap/` as the single deterministic renderer
 - `examples/` showing one bootstrapped `CODE` repo and one bootstrapped `DOC` repo
 

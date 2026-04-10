@@ -20,7 +20,9 @@ Every new roadmap item should answer:
 
 ## Priorities
 
-(no active roadmap items)
+- AC18: move `base/` and `overlays/` to `internal/templates/`, refactor `internal/bootstrap` to accept `fs.FS` instead of root path string (load-bearing step for CLI utility)
+- AC19: add `go:embed`, create `cmd/repokit` with subcommands (`new`, `adopt`, `enhance`, `version`/`ver`), wire embedded FS for new/adopt and disk FS for enhance, add GitHub version check against `kquo/repokit`
+- AC20: implement `-r`-less enhance (self-review against embedded templates), retire `cmd/bootstrap`
 
 ## Ideas To Explore
 
@@ -30,8 +32,6 @@ Pre-rubric ideas captured for future discussion. Prefix each with `IE<N>:` (sequ
 - IE2: optional LLM assistance in enhance: evaluate additive LLM roles (candidate summarization, rationale drafting, second-opinion review) on top of the deterministic core; deterministic logic stays as the enforcement layer, LLM output is informational only and opt-in
 - IE3: Let's evaluate /Users/tek1/code/skouts's ac-template.md, to maybe have repokit mimic its richer formatting and structure, and then adopt them
 - IE4: Aside from ac-template.md, what else can repokit adopt from skout repo?
-- IE6: repokit as a first-class CLI utility: evaluate shipping repokit as an installable command that agents can invoke directly for bootstrap/adopt/enhance recommendations, using the repo as the deterministic source of truth and reducing human
-  error around manual go run invocation
 
 ## Deferred
 

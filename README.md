@@ -1,8 +1,8 @@
 s# repokit
 Template repo that bootstraps and adopts governed repositories, and maintains itself through enhance mode. Built from:
 
-- a common base contract in `base/`
-- a repo-type overlay in `overlays/code/` or `overlays/doc/`
+- a common base contract in `internal/templates/base/`
+- a repo-type overlay in `internal/templates/overlays/code/` or `internal/templates/overlays/doc/`
 - a deterministic Go bootstrap command that renders concrete files into a target repo
 
 ## Why

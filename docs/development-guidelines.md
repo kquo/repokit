@@ -21,7 +21,7 @@ For workflow, see `development-cycle.md`. For validation, see `build-release.md`
 
 ## Generated Artifact Propagation
 
-- Source-of-truth code lives in `internal/`; overlay templates under `overlays/` carry standalone copies of the same logic
+- Source-of-truth code lives in `internal/`; overlay templates under `internal/templates/overlays/` carry standalone copies of the same logic
 - Fixes to `internal/buildtool`, `internal/reltool`, or `build.sh` must propagate to both overlay template copies and rendered examples
 - Grep the full repo for the pattern being changed before considering a fix complete
 - If a template and its rendered output diverge, the template is authoritative

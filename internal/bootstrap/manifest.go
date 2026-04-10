@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -34,7 +35,7 @@ func computeChecksum(content string) string {
 	return hex.EncodeToString(h[:])
 }
 
-func buildManifest(ops []operation, templateVersion, templateRoot, targetRoot string) Manifest {
+func buildManifest(ops []operation, templateVersion string, tfs fs.FS, repoRoot string, targetRoot string) Manifest {
 	m := Manifest{
 		FormatVersion:   manifestFormatVersion,
 		TemplateVersion: templateVersion,
@@ -57,8 +58,7 @@ func buildManifest(ops []operation, templateVersion, templateRoot, targetRoot st
 				Kind:       "file",
 			}
 			if op.source != "" {
-				sourcePath := filepath.Join(templateRoot, op.source)
-				sourceContent, err := os.ReadFile(sourcePath)
+				sourceContent, err := readTemplateOrRoot(tfs, repoRoot, op.source)
 				if err == nil {
 					entry.SourceChecksum = computeChecksum(string(sourceContent))
 				}

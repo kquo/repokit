@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"repokit/internal/color"
+	"repokit/internal/templates"
 )
 
 type Mode string
@@ -195,18 +196,19 @@ func ParseArgs(args []string) (Config, bool, error) {
 }
 
 func Run(cfg Config) error {
-	root, err := templateRoot()
+	repoRoot, err := resolveRepoRoot()
 	if err != nil {
 		return err
 	}
+	tfs := templates.DiskFS(repoRoot)
 
 	switch cfg.Mode {
 	case ModeNew:
-		return runNewOrAdopt(root, cfg, false)
+		return runNewOrAdopt(tfs, repoRoot, cfg, false)
 	case ModeAdopt:
-		return runNewOrAdopt(root, cfg, true)
+		return runNewOrAdopt(tfs, repoRoot, cfg, true)
 	case ModeEnhance:
-		return RunEnhance(root, cfg)
+		return RunEnhance(tfs, repoRoot, cfg)
 	default:
 		return fmt.Errorf("unsupported mode %q", cfg.Mode)
 	}
@@ -269,23 +271,23 @@ func validateConfig(cfg Config) error {
 	return nil
 }
 
-func templateRoot() (string, error) {
+func resolveRepoRoot() (string, error) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
-		return "", errors.New("resolve template root: runtime caller unavailable")
+		return "", errors.New("resolve repo root: runtime caller unavailable")
 	}
 	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 	info, err := os.Stat(root)
 	if err != nil {
-		return "", fmt.Errorf("stat template root: %w", err)
+		return "", fmt.Errorf("stat repo root: %w", err)
 	}
 	if !info.IsDir() {
-		return "", fmt.Errorf("template root is not a directory: %s", root)
+		return "", fmt.Errorf("repo root is not a directory: %s", root)
 	}
 	return root, nil
 }
 
-func runNewOrAdopt(root string, cfg Config, adopt bool) error {
+func runNewOrAdopt(tfs fs.FS, repoRoot string, cfg Config, adopt bool) error {
 	targetAbs, err := filepath.Abs(cfg.Target)
 	if err != nil {
 		return fmt.Errorf("resolve target path: %w", err)
@@ -310,14 +312,14 @@ func runNewOrAdopt(root string, cfg Config, adopt bool) error {
 	}
 	printAssessment(cfg.Mode, targetAbs, assessment)
 
-	canonical, err := planCanonical(root, cfg, targetAbs)
+	canonical, err := planCanonical(tfs, repoRoot, cfg, targetAbs)
 	if err != nil {
 		return err
 	}
 
-	versionContent, _ := os.ReadFile(filepath.Join(root, "TEMPLATE_VERSION"))
+	versionContent, _ := os.ReadFile(filepath.Join(repoRoot, "TEMPLATE_VERSION"))
 	templateVersion := strings.TrimSpace(string(versionContent))
-	manifest := buildManifest(canonical, templateVersion, root, targetAbs)
+	manifest := buildManifest(canonical, templateVersion, tfs, repoRoot, targetAbs)
 	manifestOp := operation{
 		kind:    "write",
 		path:    filepath.Join(targetAbs, manifestFileName),
@@ -346,12 +348,12 @@ func runNewOrAdopt(root string, cfg Config, adopt bool) error {
 }
 
 // RunEnhance runs enhance mode against a reference repo. Exported for testing.
-func RunEnhance(root string, cfg Config) error {
+func RunEnhance(tfs fs.FS, repoRoot string, cfg Config) error {
 	refAbs, err := filepath.Abs(cfg.Reference)
 	if err != nil {
 		return fmt.Errorf("resolve reference path: %w", err)
 	}
-	report, err := ReviewEnhancement(root, refAbs)
+	report, err := ReviewEnhancement(tfs, repoRoot, refAbs)
 	if err != nil {
 		return err
 	}
@@ -363,7 +365,7 @@ func RunEnhance(root string, cfg Config) error {
 		return nil
 	}
 
-	docsDir := filepath.Join(root, "docs")
+	docsDir := filepath.Join(repoRoot, "docs")
 	acNum, err := nextACNumber(docsDir)
 	if err != nil {
 		return err
@@ -376,7 +378,7 @@ func RunEnhance(root string, cfg Config) error {
 	if cfg.DryRun {
 		fmt.Printf("dry-run write %s (enhancement AC doc)\n", acPath)
 		if cfg.Apply {
-			if err := applyProposals(root, selected, deferred, true); err != nil {
+			if err := applyProposals(repoRoot, selected, deferred, true); err != nil {
 				return err
 			}
 		}
@@ -391,7 +393,7 @@ func RunEnhance(root string, cfg Config) error {
 	}
 	fmt.Printf("write %s (enhancement AC doc)\n", acPath)
 	if cfg.Apply {
-		if err := applyProposals(root, selected, deferred, false); err != nil {
+		if err := applyProposals(repoRoot, selected, deferred, false); err != nil {
 			return err
 		}
 	}
@@ -399,7 +401,7 @@ func RunEnhance(root string, cfg Config) error {
 	return nil
 }
 
-func applyProposals(templateRoot string, selected EnhancementCandidate, deferred []EnhancementCandidate, dryRun bool) error {
+func applyProposals(repoRoot string, selected EnhancementCandidate, deferred []EnhancementCandidate, dryRun bool) error {
 	candidates := []EnhancementCandidate{selected}
 	for _, d := range deferred {
 		if isActionable(d) {
@@ -413,7 +415,7 @@ func applyProposals(templateRoot string, selected EnhancementCandidate, deferred
 			return fmt.Errorf("read reference file %s: %w", c.Path, err)
 		}
 
-		targetPath := filepath.Join(templateRoot, c.TemplateTarget)
+		targetPath := filepath.Join(templates.DirPath(repoRoot), c.TemplateTarget)
 		proposal := proposalPath(targetPath)
 
 		if dryRun {
@@ -554,7 +556,7 @@ func AssessTarget(root string, repoType RepoType) (Assessment, error) {
 	}, nil
 }
 
-func ReviewEnhancement(templateRoot, referenceRoot string) (EnhancementReport, error) {
+func ReviewEnhancement(tfs fs.FS, repoRoot string, referenceRoot string) (EnhancementReport, error) {
 	manifest, hasManifest, err := readManifest(referenceRoot)
 	if err != nil {
 		return EnhancementReport{}, err
@@ -565,35 +567,35 @@ func ReviewEnhancement(templateRoot, referenceRoot string) (EnhancementReport, e
 	}
 
 	var candidates []EnhancementCandidate
-	if governanceCandidates, err := reviewGovernedSections(templateRoot, referenceRoot, mmap); err != nil {
+	if governanceCandidates, err := reviewGovernedSections(tfs, referenceRoot, mmap); err != nil {
 		return EnhancementReport{}, err
 	} else {
 		candidates = append(candidates, governanceCandidates...)
 	}
 
 	mappings := []enhancementMapping{
-		{Area: "bootstrap behavior", ReferencePaths: []string{filepath.Join("cmd", "bootstrap", "main.go"), filepath.Join("scripts", "bootstrap")}, TemplateTarget: filepath.Join("cmd", "bootstrap", "main.go")},
-		{Area: "bootstrap behavior", ReferencePaths: []string{filepath.Join("scripts", "bootstrap")}, TemplateTarget: filepath.Join("scripts", "README.md")},
-		{Area: "CODE overlay", ReferencePaths: []string{"README.md"}, TemplateTarget: filepath.Join("overlays", "code", "files", "README.md.tmpl")},
-		{Area: "CODE overlay", ReferencePaths: []string{"arch.md"}, TemplateTarget: filepath.Join("overlays", "code", "files", "arch.md.tmpl")},
-		{Area: "CODE overlay", ReferencePaths: []string{"plan.md"}, TemplateTarget: filepath.Join("overlays", "code", "files", "plan.md.tmpl")},
-		{Area: "CODE overlay", ReferencePaths: []string{filepath.Join("docs", "development-cycle.md")}, TemplateTarget: filepath.Join("overlays", "code", "files", "docs", "development-cycle.md.tmpl")},
-		{Area: "CODE overlay", ReferencePaths: []string{filepath.Join("docs", "ac-template.md")}, TemplateTarget: filepath.Join("overlays", "code", "files", "docs", "ac-template.md.tmpl")},
-		{Area: "CODE overlay", ReferencePaths: []string{filepath.Join("docs", "build-release.md")}, TemplateTarget: filepath.Join("overlays", "code", "files", "docs", "build-release.md.tmpl")},
-		{Area: "CODE overlay", ReferencePaths: []string{"build.sh"}, TemplateTarget: filepath.Join("overlays", "code", "files", "build.sh.tmpl")},
-		{Area: "CODE overlay", ReferencePaths: []string{filepath.Join("cmd", "build", "main.go")}, TemplateTarget: filepath.Join("overlays", "code", "files", "cmd", "build", "main.go.tmpl")},
-		{Area: "CODE overlay", ReferencePaths: []string{filepath.Join("cmd", "rel", "main.go")}, TemplateTarget: filepath.Join("overlays", "code", "files", "cmd", "rel", "main.go.tmpl")},
-		{Area: "DOC overlay", ReferencePaths: []string{"README.md"}, TemplateTarget: filepath.Join("overlays", "doc", "files", "README.md.tmpl")},
-		{Area: "DOC overlay", ReferencePaths: []string{"style.md", "voice.md"}, TemplateTarget: filepath.Join("overlays", "doc", "files", "style.md.tmpl")},
-		{Area: "DOC overlay", ReferencePaths: []string{"content-plan.md", "calendar.md"}, TemplateTarget: filepath.Join("overlays", "doc", "files", "content-plan.md.tmpl")},
-		{Area: "DOC overlay", ReferencePaths: []string{"publishing-workflow.md"}, TemplateTarget: filepath.Join("overlays", "doc", "files", "publishing-workflow.md.tmpl")},
-		{Area: "DOC overlay", ReferencePaths: []string{"release.md"}, TemplateTarget: filepath.Join("overlays", "doc", "files", "release.md.tmpl")},
-		{Area: "DOC overlay", ReferencePaths: []string{"rel.sh"}, TemplateTarget: filepath.Join("overlays", "doc", "files", "rel.sh.tmpl")},
-		{Area: "DOC overlay", ReferencePaths: []string{filepath.Join("cmd", "rel", "main.go")}, TemplateTarget: filepath.Join("overlays", "doc", "files", "cmd", "rel", "main.go.tmpl")},
+		{Area: "bootstrap behavior", ReferencePaths: []string{"cmd/bootstrap/main.go", "scripts/bootstrap"}, TemplateTarget: "cmd/bootstrap/main.go"},
+		{Area: "bootstrap behavior", ReferencePaths: []string{"scripts/bootstrap"}, TemplateTarget: "scripts/README.md"},
+		{Area: "CODE overlay", ReferencePaths: []string{"README.md"}, TemplateTarget: "overlays/code/files/README.md.tmpl"},
+		{Area: "CODE overlay", ReferencePaths: []string{"arch.md"}, TemplateTarget: "overlays/code/files/arch.md.tmpl"},
+		{Area: "CODE overlay", ReferencePaths: []string{"plan.md"}, TemplateTarget: "overlays/code/files/plan.md.tmpl"},
+		{Area: "CODE overlay", ReferencePaths: []string{"docs/development-cycle.md"}, TemplateTarget: "overlays/code/files/docs/development-cycle.md.tmpl"},
+		{Area: "CODE overlay", ReferencePaths: []string{"docs/ac-template.md"}, TemplateTarget: "overlays/code/files/docs/ac-template.md.tmpl"},
+		{Area: "CODE overlay", ReferencePaths: []string{"docs/build-release.md"}, TemplateTarget: "overlays/code/files/docs/build-release.md.tmpl"},
+		{Area: "CODE overlay", ReferencePaths: []string{"build.sh"}, TemplateTarget: "overlays/code/files/build.sh.tmpl"},
+		{Area: "CODE overlay", ReferencePaths: []string{"cmd/build/main.go"}, TemplateTarget: "overlays/code/files/cmd/build/main.go.tmpl"},
+		{Area: "CODE overlay", ReferencePaths: []string{"cmd/rel/main.go"}, TemplateTarget: "overlays/code/files/cmd/rel/main.go.tmpl"},
+		{Area: "DOC overlay", ReferencePaths: []string{"README.md"}, TemplateTarget: "overlays/doc/files/README.md.tmpl"},
+		{Area: "DOC overlay", ReferencePaths: []string{"style.md", "voice.md"}, TemplateTarget: "overlays/doc/files/style.md.tmpl"},
+		{Area: "DOC overlay", ReferencePaths: []string{"content-plan.md", "calendar.md"}, TemplateTarget: "overlays/doc/files/content-plan.md.tmpl"},
+		{Area: "DOC overlay", ReferencePaths: []string{"publishing-workflow.md"}, TemplateTarget: "overlays/doc/files/publishing-workflow.md.tmpl"},
+		{Area: "DOC overlay", ReferencePaths: []string{"release.md"}, TemplateTarget: "overlays/doc/files/release.md.tmpl"},
+		{Area: "DOC overlay", ReferencePaths: []string{"rel.sh"}, TemplateTarget: "overlays/doc/files/rel.sh.tmpl"},
+		{Area: "DOC overlay", ReferencePaths: []string{"cmd/rel/main.go"}, TemplateTarget: "overlays/doc/files/cmd/rel/main.go.tmpl"},
 		{Area: "examples or upgrade path", ReferencePaths: []string{"TEMPLATE_VERSION"}, TemplateTarget: "TEMPLATE_VERSION"},
 	}
 	for _, item := range mappings {
-		candidate, ok, err := reviewMappedFile(templateRoot, referenceRoot, item, mmap)
+		candidate, ok, err := reviewMappedFile(tfs, repoRoot, referenceRoot, item, mmap)
 		if err != nil {
 			return EnhancementReport{}, err
 		}
@@ -651,8 +653,8 @@ func stackSuggestsGo(stack string) bool {
 	return goStackPattern.MatchString(stack)
 }
 
-func planRender(root string, cfg Config, targetRoot string, adopt bool) ([]operation, error) {
-	canonical, err := planCanonical(root, cfg, targetRoot)
+func planRender(tfs fs.FS, repoRoot string, cfg Config, targetRoot string, adopt bool) ([]operation, error) {
+	canonical, err := planCanonical(tfs, repoRoot, cfg, targetRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -662,7 +664,7 @@ func planRender(root string, cfg Config, targetRoot string, adopt bool) ([]opera
 	return compactOperations(applyAdoptTransforms(canonical)), nil
 }
 
-func planCanonical(root string, cfg Config, targetRoot string) ([]operation, error) {
+func planCanonical(tfs fs.FS, repoRoot string, cfg Config, targetRoot string) ([]operation, error) {
 	placeholders := map[string]string{
 		"{{REPO_NAME}}":           cfg.RepoName,
 		"{{PROJECT_PURPOSE}}":     cfg.Purpose,
@@ -671,7 +673,7 @@ func planCanonical(root string, cfg Config, targetRoot string) ([]operation, err
 		"{{DOC_STYLE}}":           valueOrDefault(cfg.Style, "TBD"),
 	}
 
-	agentsContent, err := readAndRender(filepath.Join(root, "base", "AGENTS.md"), placeholders)
+	agentsContent, err := readAndRender(tfs, "base/AGENTS.md", placeholders)
 	if err != nil {
 		return nil, err
 	}
@@ -680,10 +682,10 @@ func planCanonical(root string, cfg Config, targetRoot string) ([]operation, err
 		path:    filepath.Join(targetRoot, "AGENTS.md"),
 		content: agentsContent,
 		note:    "base governance contract",
-		source:  filepath.Join("base", "AGENTS.md"),
+		source:  "base/AGENTS.md",
 	}}
 
-	versionContent, err := os.ReadFile(filepath.Join(root, "TEMPLATE_VERSION"))
+	versionContent, err := os.ReadFile(filepath.Join(repoRoot, "TEMPLATE_VERSION"))
 	if err != nil {
 		return nil, fmt.Errorf("read template version: %w", err)
 	}
@@ -700,40 +702,36 @@ func planCanonical(root string, cfg Config, targetRoot string) ([]operation, err
 		path:   filepath.Join(targetRoot, "CLAUDE.md"),
 		linkTo: "AGENTS.md",
 		note:   "agent alias link",
-		source: filepath.Join("base", "AGENTS.md"),
+		source: "base/AGENTS.md",
 	})
 
-	overlayRoot := filepath.Join(root, "overlays", strings.ToLower(string(cfg.Type)), "files")
-	err = filepath.WalkDir(overlayRoot, func(path string, d fs.DirEntry, walkErr error) error {
+	overlayPrefix := "overlays/" + strings.ToLower(string(cfg.Type)) + "/files"
+	err = fs.WalkDir(tfs, overlayPrefix, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if d.IsDir() {
 			return nil
 		}
-		rel, err := filepath.Rel(overlayRoot, path)
-		if err != nil {
-			return err
-		}
+		rel := strings.TrimPrefix(path, overlayPrefix+"/")
 		if cfg.Type == RepoTypeCode && !stackSuggestsGo(cfg.Stack) &&
-			(rel == filepath.Join("cmd", "rel", "main.go.tmpl") ||
-				rel == filepath.Join("cmd", "rel", "color.go.tmpl") ||
-				rel == filepath.Join("cmd", "build", "main.go.tmpl") ||
-				rel == filepath.Join("cmd", "build", "color.go.tmpl")) {
+			(rel == "cmd/rel/main.go.tmpl" ||
+				rel == "cmd/rel/color.go.tmpl" ||
+				rel == "cmd/build/main.go.tmpl" ||
+				rel == "cmd/build/color.go.tmpl") {
 			return nil
 		}
 		targetRel := strings.TrimSuffix(rel, ".tmpl")
-		content, err := readAndRender(path, placeholders)
+		content, err := readAndRender(tfs, path, placeholders)
 		if err != nil {
 			return err
 		}
-		sourceRel, _ := filepath.Rel(root, path)
 		ops = append(ops, operation{
 			kind:    "write",
 			path:    filepath.Join(targetRoot, targetRel),
 			content: content,
 			note:    "overlay file",
-			source:  sourceRel,
+			source:  path,
 		})
 		return nil
 	})
@@ -897,17 +895,16 @@ func formatCandidateLine(c EnhancementCandidate, referenceRoot string) string {
 	return b.String()
 }
 
-func reviewGovernedSections(templateRoot, referenceRoot string, mmap map[string]ManifestEntry) ([]EnhancementCandidate, error) {
+func reviewGovernedSections(tfs fs.FS, referenceRoot string, mmap map[string]ManifestEntry) ([]EnhancementCandidate, error) {
 	refPath := filepath.Join(referenceRoot, "AGENTS.md")
 	refInfo, err := os.Stat(refPath)
 	if err != nil || refInfo.IsDir() {
 		return nil, nil
 	}
 
-	templatePath := filepath.Join(templateRoot, "base", "AGENTS.md")
-	templateContent, err := os.ReadFile(templatePath)
+	templateContent, err := fs.ReadFile(tfs, "base/AGENTS.md")
 	if err != nil {
-		return nil, fmt.Errorf("read template governance file %s: %w", templatePath, err)
+		return nil, fmt.Errorf("read template governance file base/AGENTS.md: %w", err)
 	}
 	refContent, err := os.ReadFile(refPath)
 	if err != nil {
@@ -921,7 +918,7 @@ func reviewGovernedSections(templateRoot, referenceRoot string, mmap map[string]
 			userChanged := computeChecksum(string(refContent)) != entry.Checksum
 			templateChanged := false
 			if entry.SourcePath != "" && entry.SourceChecksum != "" {
-				sourceContent, readErr := os.ReadFile(filepath.Join(templateRoot, entry.SourcePath))
+				sourceContent, readErr := fs.ReadFile(tfs, entry.SourcePath)
 				if readErr == nil {
 					templateChanged = computeChecksum(string(sourceContent)) != entry.SourceChecksum
 				}
@@ -951,7 +948,7 @@ func reviewGovernedSections(templateRoot, referenceRoot string, mmap map[string]
 		if governanceSectionCovered(section, templateBody, refBody) {
 			continue
 		}
-		portability, disposition, reason := classifyEnhancement(refBody, referenceRoot, filepath.Join("base", "AGENTS.md"), true)
+		portability, disposition, reason := classifyEnhancement(refBody, referenceRoot, "base/AGENTS.md", true)
 		candidates = append(candidates, EnhancementCandidate{
 			Area:            "base governance",
 			Path:            refPath,
@@ -959,7 +956,7 @@ func reviewGovernedSections(templateRoot, referenceRoot string, mmap map[string]
 			Disposition:     disposition,
 			Reason:          reason,
 			Portability:     portability,
-			TemplateTarget:  filepath.Join("base", "AGENTS.md"),
+			TemplateTarget:  "base/AGENTS.md",
 			Summary:         summarizeSectionDelta(section, refBody),
 			CollisionImpact: "medium",
 			ChangeOrigin:    sectionOrigin,
@@ -968,7 +965,7 @@ func reviewGovernedSections(templateRoot, referenceRoot string, mmap map[string]
 	return candidates, nil
 }
 
-func reviewMappedFile(templateRoot, referenceRoot string, item enhancementMapping, mmap map[string]ManifestEntry) (EnhancementCandidate, bool, error) {
+func reviewMappedFile(tfs fs.FS, repoRoot string, referenceRoot string, item enhancementMapping, mmap map[string]ManifestEntry) (EnhancementCandidate, bool, error) {
 	refPath, ok := firstExistingPath(referenceRoot, item.ReferencePaths)
 	if !ok {
 		return EnhancementCandidate{}, false, nil
@@ -979,11 +976,10 @@ func reviewMappedFile(templateRoot, referenceRoot string, item enhancementMappin
 		return EnhancementCandidate{}, false, fmt.Errorf("read reference file %s: %w", refPath, err)
 	}
 
-	targetPath := filepath.Join(templateRoot, item.TemplateTarget)
-	targetContent, err := os.ReadFile(targetPath)
+	targetContent, err := readTemplateOrRoot(tfs, repoRoot, item.TemplateTarget)
 	targetExists := err == nil
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return EnhancementCandidate{}, false, fmt.Errorf("read template file %s: %w", targetPath, err)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, os.ErrNotExist) {
+		return EnhancementCandidate{}, false, fmt.Errorf("read template file %s: %w", item.TemplateTarget, err)
 	}
 	if targetExists && normalizedEqual(string(refContent), string(targetContent)) {
 		return EnhancementCandidate{}, false, nil
@@ -998,7 +994,7 @@ func reviewMappedFile(templateRoot, referenceRoot string, item enhancementMappin
 			userChanged := computeChecksum(string(refContent)) != entry.Checksum
 			templateChanged := false
 			if entry.SourcePath != "" && entry.SourceChecksum != "" {
-				sourceContent, readErr := os.ReadFile(filepath.Join(templateRoot, entry.SourcePath))
+				sourceContent, readErr := readTemplateOrRoot(tfs, repoRoot, entry.SourcePath)
 				if readErr == nil {
 					templateChanged = computeChecksum(string(sourceContent)) != entry.SourceChecksum
 				}
@@ -1786,8 +1782,19 @@ func proposalPath(path string) string {
 	return filepath.Join(dir, name+".template-proposed"+ext)
 }
 
-func readAndRender(path string, placeholders map[string]string) (string, error) {
-	content, err := os.ReadFile(path)
+// readTemplateOrRoot reads a file from the template FS first; if not found,
+// falls back to the repo root. This handles files like TEMPLATE_VERSION that
+// live at the repo root rather than inside internal/templates/.
+func readTemplateOrRoot(tfs fs.FS, repoRoot, path string) ([]byte, error) {
+	content, err := fs.ReadFile(tfs, path)
+	if err == nil {
+		return content, nil
+	}
+	return os.ReadFile(filepath.Join(repoRoot, path))
+}
+
+func readAndRender(tfs fs.FS, path string, placeholders map[string]string) (string, error) {
+	content, err := fs.ReadFile(tfs, path)
 	if err != nil {
 		return "", fmt.Errorf("read template file %s: %w", path, err)
 	}
