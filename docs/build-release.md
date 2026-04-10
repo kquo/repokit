@@ -46,6 +46,12 @@ or:
 
 If you pass `build`, `bootstrap`, or `rel` as targets, the command will validate those entrypoints but will not install binaries for them.
 
+## Drift Check
+
+After installing binaries, the build tool runs a passive governance drift check via `governa enhance -d` (self-review mode). If `governa` was installed by this build, it uses that exact binary; otherwise it falls back to any `governa` on `$PATH`. If neither is available the step is silently skipped.
+
+When drift is detected the build prints a `summary:` line (e.g. `summary: 1 changed, 0 added, 0 removed`). The check is advisory and never blocks the build.
+
 ## Canonical Release Commands
 
 ```bash

@@ -6,7 +6,7 @@ Template repo that bootstraps and adopts governed repositories, and maintains it
 - a deterministic Go CLI that renders and reviews governed repo structure
 
 ## Why
-Most AI-assisted repository work fails not due to model limits, but because the collaboration contract is implicit, inconsistent, and non-reproducible. **governa** makes this contract explicit by defining a governance and workflow framework for deterministic human–AI collaboration. It provides a stable, versioned structure for proposing, reviewing, documenting, and maintaining work, ensuring both human and agent follow the same transparent rules instead of transient session context. The goal is not more process, but less coordination drift, reduced prompt-bound state, and more repeatable project outcomes.
+AI-assisted repository work often breaks down not because of model limitations, but because the collaboration contract is implicit, inconsistent, and hard to reproduce. **governa** makes this contract explicit by defining a governance and workflow framework for deterministic human–AI collaboration. It provides a stable, versioned structure for proposing, reviewing, documenting, and maintaining work, ensuring both human and agent follow the same transparent rules instead of transient session context. The goal is not more process, but less coordination drift, reduced prompt-bound state, and more repeatable project outcomes.
 
 ## Install
 

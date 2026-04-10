@@ -27,7 +27,7 @@ Every new roadmap item should answer:
 Pre-rubric ideas captured for future discussion. Prefix each with `IE<N>:` (sequential N) for stable references. These are not commitments and have not passed the Objective-Fit Rubric. Remove entries when promoted to an AC, completed, or no longer interesting; this section is pre-rubric staging, not a historical record.
 
 - IE1: non-git target support: bootstrap into directories that are not git repos, for security/privacy use cases where git may be added later or never
-- IE8: build-time drift check: add an optional step to `./build.sh` (or the build tool) that runs `governa adopt -d` when `governa` is installed, printing a drift notice if the repo's governance or overlay files are behind the current template — surfaces drift passively without requiring agent initiative or human memory
+
 
 ## Deferred
 
