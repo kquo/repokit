@@ -25,6 +25,6 @@ This repo uses an acceptance-criteria-first workflow when scope needs explicit r
 - keep roadmap decisions in `plan.md`
 - keep architecture changes in `arch.md`
 - keep repo-level governance in `AGENTS.md`
-- record loose, pre-rubric follow-on ideas in `plan.md` under `Ideas To Explore`
+- record loose, pre-rubric follow-on ideas in `plan.md` under `Ideas To Explore` with an `IE<N>:` prefix
 - record rubric-cleared follow-on work in `plan.md` under `Priorities`
-- promotion path: idea → discussion → Objective-Fit Rubric → `Priorities` → AC
+- promotion path: IE entry → discussion → Objective-Fit Rubric → `Priorities` → AC

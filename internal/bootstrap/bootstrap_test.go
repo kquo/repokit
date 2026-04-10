@@ -3137,3 +3137,42 @@ func TestReadmeConsolidatedStructure(t *testing.T) {
 		t.Error("README.md: should contain neutral `bootstrap --help` pointer")
 	}
 }
+
+func TestIdeasToExploreIEPrefix(t *testing.T) {
+	t.Parallel()
+
+	// Self-hosted plan.md must document the IE prefix convention and use it
+	content := readRepoFile(t, "plan.md")
+	if !strings.Contains(content, "`IE<N>:`") {
+		t.Error("plan.md: Ideas To Explore preamble should document the `IE<N>:` prefix convention")
+	}
+	if !strings.Contains(content, "- IE1:") {
+		t.Error("plan.md: existing ideas should use IE prefix (expected IE1)")
+	}
+
+	// Overlay template and rendered example must document the convention
+	for _, path := range []string{
+		"overlays/code/files/plan.md.tmpl",
+		"examples/code/plan.md",
+	} {
+		c := readRepoFile(t, path)
+		if !strings.Contains(c, "`IE<N>:`") {
+			t.Errorf("%s: Ideas To Explore preamble should document the `IE<N>:` prefix convention", path)
+		}
+	}
+
+	// Development cycle docs must reference IE prefix
+	for _, path := range []string{
+		"docs/development-cycle.md",
+		"overlays/code/files/docs/development-cycle.md.tmpl",
+		"examples/code/docs/development-cycle.md",
+	} {
+		c := readRepoFile(t, path)
+		if !strings.Contains(c, "`IE<N>:`") {
+			t.Errorf("%s: should reference `IE<N>:` prefix for Ideas To Explore entries", path)
+		}
+		if !strings.Contains(c, "IE entry") {
+			t.Errorf("%s: promotion path should reference IE entries", path)
+		}
+	}
+}
