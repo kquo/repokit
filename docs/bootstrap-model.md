@@ -177,7 +177,7 @@ Subcommand interface:
 
 ```text
 governa new [-t <target>] -y CODE|DOC -n "<name>" -p "<purpose>" [-s "<stack>"] [-g] [-d]
-governa adopt [-t <target>] [-y CODE|DOC] -n "<name>" -p "<purpose>" [-s "<stack>"] [-d]
+governa adopt [-t <target>] [-y CODE|DOC] [-n "<name>"] [-p "<purpose>"] [-s "<stack>"] [-d]
 governa enhance [-r <reference>] [-d] [-a]
 governa version
 ```
@@ -187,7 +187,7 @@ The agent may gather inputs interactively, but the command itself accepts explic
 Mode-specific expectations:
 
 - `new`: requires `type`, `repo-name`, `purpose`, plus overlay-specific metadata
-- `adopt`: requires `type` unless inferred confidently, `repo-name`, and `purpose`; when type is specified, overlay-specific metadata also becomes required (`stack` for CODE, `publishing-platform` and `style` for DOC)
+- `adopt`: all parameters are resolved in priority order: (1) explicit flag, (2) stored manifest params from a previous adopt, (3) inference from the target directory. Repo name is inferred from the directory basename, purpose from the first `README.md` paragraph, stack from manifest files (`go.mod`, `package.json`, etc.), and type from `AssessTarget` signals. Required parameters error only if all three sources fail. On re-adopt, the manifest provides all previously stored values so no flags are needed
 - `enhance` with `-r`: inspects a reference repo for portable improvements
 - `enhance` without `-r`: self-review comparing on-disk templates against the embedded baseline
 
@@ -305,8 +305,9 @@ During `new` and `adopt` bootstrap, governa writes a `.governa-manifest` file in
 - the template version used at bootstrap time
 - SHA-256 checksums of each generated file (after placeholder substitution)
 - the source template path and checksum for each file
+- adopt parameters (repo name, purpose, type, stack, and DOC-specific fields) so subsequent adopt runs can reuse them without flags
 
-The manifest enables three-way comparison during enhance: by comparing the current reference file against its bootstrap-time checksum, and the current template source against its bootstrap-time checksum, enhance can determine whether a difference came from user customization, template evolution, or both. Repos bootstrapped before this feature have no manifest and fall back to the original two-way comparison.
+The manifest enables three-way comparison during enhance: by comparing the current reference file against its bootstrap-time checksum, and the current template source against its bootstrap-time checksum, enhance can determine whether a difference came from user customization, template evolution, or both. Repos bootstrapped before this feature have no manifest and fall back to the original two-way comparison. Manifests written before parameter storage are backward compatible — missing params are inferred from the target directory on the next adopt run and stored in the updated manifest.
 
 ## Why This Fits The Template Repo
 

@@ -17,9 +17,19 @@ const manifestFileName = ".governa-manifest"
 const legacyManifestFileName = ".repokit-manifest"
 const legacyManifestFormatVersion = "repokit-manifest-v1"
 
+type ManifestParams struct {
+	RepoName           string
+	Purpose            string
+	Type               string
+	Stack              string
+	PublishingPlatform string
+	Style              string
+}
+
 type Manifest struct {
 	FormatVersion   string
 	TemplateVersion string
+	Params          ManifestParams
 	Entries         []ManifestEntry
 }
 
@@ -87,6 +97,24 @@ func formatManifest(m Manifest) string {
 	var b strings.Builder
 	fmt.Fprintln(&b, m.FormatVersion)
 	fmt.Fprintf(&b, "template-version: %s\n", m.TemplateVersion)
+	if m.Params.RepoName != "" {
+		fmt.Fprintf(&b, "repo-name: %s\n", m.Params.RepoName)
+	}
+	if m.Params.Purpose != "" {
+		fmt.Fprintf(&b, "purpose: %s\n", m.Params.Purpose)
+	}
+	if m.Params.Type != "" {
+		fmt.Fprintf(&b, "type: %s\n", m.Params.Type)
+	}
+	if m.Params.Stack != "" {
+		fmt.Fprintf(&b, "stack: %s\n", m.Params.Stack)
+	}
+	if m.Params.PublishingPlatform != "" {
+		fmt.Fprintf(&b, "publishing-platform: %s\n", m.Params.PublishingPlatform)
+	}
+	if m.Params.Style != "" {
+		fmt.Fprintf(&b, "style: %s\n", m.Params.Style)
+	}
 	b.WriteString("\n")
 
 	for _, e := range m.Entries {
@@ -135,6 +163,18 @@ func parseManifest(content string) (Manifest, error) {
 		switch key {
 		case "template-version":
 			m.TemplateVersion = value
+		case "repo-name":
+			m.Params.RepoName = value
+		case "purpose":
+			m.Params.Purpose = value
+		case "type":
+			m.Params.Type = value
+		case "stack":
+			m.Params.Stack = value
+		case "publishing-platform":
+			m.Params.PublishingPlatform = value
+		case "style":
+			m.Params.Style = value
 		}
 	}
 

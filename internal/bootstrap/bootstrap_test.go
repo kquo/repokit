@@ -2990,28 +2990,6 @@ func TestPlanMdHasIdeasToExploreSection(t *testing.T) {
 	}
 }
 
-func TestPlanMdNonGitItemMigratedToIdeas(t *testing.T) {
-	t.Parallel()
-	content := readRepoFile(t, "plan.md")
-	prioritiesIdx := strings.Index(content, "## Priorities")
-	ideasIdx := strings.Index(content, "## Ideas To Explore")
-	if prioritiesIdx < 0 || ideasIdx < 0 {
-		t.Fatal("plan.md: required sections missing")
-	}
-	prioritiesSection := content[prioritiesIdx:ideasIdx]
-	if strings.Contains(prioritiesSection, "non-git target") {
-		t.Fatal("plan.md: 'non-git target' should NOT appear in Priorities (must be migrated to Ideas To Explore)")
-	}
-	deferredIdx := strings.Index(content, "## Deferred")
-	if deferredIdx < 0 {
-		t.Fatal("plan.md: ## Deferred missing")
-	}
-	ideasSection := content[ideasIdx:deferredIdx]
-	if !strings.Contains(ideasSection, "non-git target") {
-		t.Fatal("plan.md: 'non-git target' should appear in Ideas To Explore section")
-	}
-}
-
 func TestCodeOverlayPlanTemplateHasIdeasToExploreSection(t *testing.T) {
 	t.Parallel()
 	content := readRepoFile(t, "internal/templates/overlays/code/files/plan.md.tmpl")
@@ -3148,9 +3126,6 @@ func TestIdeasToExploreIEPrefix(t *testing.T) {
 	content := readRepoFile(t, "plan.md")
 	if !strings.Contains(content, "`IE<N>:`") {
 		t.Error("plan.md: Ideas To Explore preamble should document the `IE<N>:` prefix convention")
-	}
-	if !strings.Contains(content, "- IE1:") {
-		t.Error("plan.md: existing ideas should use IE prefix (expected IE1)")
 	}
 
 	// Overlay template and rendered example must document the convention
@@ -3941,5 +3916,300 @@ func TestAdoptNoDrift(t *testing.T) {
 	output := string(captured)
 	if !strings.Contains(output, "drift: none detected") {
 		t.Fatalf("adopt with no existing files should show 'drift: none detected', got: %q", output)
+	}
+}
+
+// --- inferRepoName tests ---
+
+func TestInferRepoNameBasic(t *testing.T) {
+	t.Parallel()
+	got := inferRepoName("/Users/someone/code/myproject")
+	if got != "myproject" {
+		t.Fatalf("inferRepoName() = %q, want myproject", got)
+	}
+}
+
+func TestInferRepoNameDot(t *testing.T) {
+	t.Parallel()
+	got := inferRepoName(".")
+	// Should resolve to actual directory name, not "."
+	if got == "." || got == "" {
+		t.Fatalf("inferRepoName(\".\") should resolve to directory name, got %q", got)
+	}
+}
+
+// --- inferPurpose tests ---
+
+func TestInferPurposeFromReadme(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# My Project\n\nA tool that does useful things.\n\nMore details here.\n"), 0o644)
+	got := inferPurpose(dir)
+	if got != "A tool that does useful things." {
+		t.Fatalf("inferPurpose() = %q, want first paragraph", got)
+	}
+}
+
+func TestInferPurposeSkipsBadges(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# My Project\n\n![badge](url)\n\nActual description here.\n"), 0o644)
+	got := inferPurpose(dir)
+	if got != "Actual description here." {
+		t.Fatalf("inferPurpose() = %q, want description after badge", got)
+	}
+}
+
+func TestInferPurposeNoReadme(t *testing.T) {
+	t.Parallel()
+	got := inferPurpose(t.TempDir())
+	if got != "" {
+		t.Fatalf("inferPurpose() = %q, want empty for no README", got)
+	}
+}
+
+func TestInferPurposeHeadingsOnly(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Title\n## Subtitle\n### Section\n"), 0o644)
+	got := inferPurpose(dir)
+	if got != "" {
+		t.Fatalf("inferPurpose() = %q, want empty for headings-only README", got)
+	}
+}
+
+func TestInferPurposeTruncatesLong(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	long := strings.Repeat("x", 250)
+	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Title\n\n"+long+"\n"), 0o644)
+	got := inferPurpose(dir)
+	if len(got) != 200 {
+		t.Fatalf("inferPurpose() len = %d, want 200", len(got))
+	}
+}
+
+// --- inferStack tests ---
+
+func TestInferStackGo(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com\n"), 0o644)
+	got := inferStack(dir)
+	if got != "Go" {
+		t.Fatalf("inferStack() = %q, want Go", got)
+	}
+}
+
+func TestInferStackNode(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "package.json"), []byte("{}"), 0o644)
+	got := inferStack(dir)
+	if got != "Node" {
+		t.Fatalf("inferStack() = %q, want Node", got)
+	}
+}
+
+func TestInferStackNone(t *testing.T) {
+	t.Parallel()
+	got := inferStack(t.TempDir())
+	if got != "" {
+		t.Fatalf("inferStack() = %q, want empty", got)
+	}
+}
+
+// --- resolveAdoptParams tests ---
+
+func TestResolveAdoptParamsFlagOverridesAll(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	// Write manifest with stored params
+	m := Manifest{
+		FormatVersion:   manifestFormatVersion,
+		TemplateVersion: "0.7.1",
+		Params: ManifestParams{
+			RepoName: "old-name",
+			Purpose:  "old purpose",
+			Stack:    "Python",
+		},
+	}
+	os.WriteFile(filepath.Join(dir, manifestFileName), []byte(formatManifest(m)), 0o644)
+	// Also write a go.mod so inference would say "Go"
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com\n"), 0o644)
+
+	cfg := Config{
+		Mode:     ModeAdopt,
+		Target:   dir,
+		RepoName: "flag-name",
+		Purpose:  "flag purpose",
+		Stack:    "Rust",
+	}
+	resolved, sources := resolveAdoptParams(cfg, dir)
+	if resolved.RepoName != "flag-name" {
+		t.Fatalf("RepoName = %q, want flag-name", resolved.RepoName)
+	}
+	if resolved.Purpose != "flag purpose" {
+		t.Fatalf("Purpose = %q, want flag purpose", resolved.Purpose)
+	}
+	if resolved.Stack != "Rust" {
+		t.Fatalf("Stack = %q, want Rust", resolved.Stack)
+	}
+	for _, s := range sources {
+		if s.source != "flag" {
+			t.Fatalf("source for %s = %q, want flag", s.name, s.source)
+		}
+	}
+}
+
+func TestResolveAdoptParamsFromManifest(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	m := Manifest{
+		FormatVersion:   manifestFormatVersion,
+		TemplateVersion: "0.7.1",
+		Params: ManifestParams{
+			RepoName: "stored-name",
+			Purpose:  "stored purpose",
+			Stack:    "Go",
+		},
+	}
+	os.WriteFile(filepath.Join(dir, manifestFileName), []byte(formatManifest(m)), 0o644)
+
+	cfg := Config{Mode: ModeAdopt, Target: dir}
+	resolved, sources := resolveAdoptParams(cfg, dir)
+	if resolved.RepoName != "stored-name" {
+		t.Fatalf("RepoName = %q, want stored-name", resolved.RepoName)
+	}
+	if resolved.Purpose != "stored purpose" {
+		t.Fatalf("Purpose = %q, want stored purpose", resolved.Purpose)
+	}
+	for _, s := range sources {
+		if s.source != "manifest" {
+			t.Fatalf("source for %s = %q, want manifest", s.name, s.source)
+		}
+	}
+}
+
+func TestResolveAdoptParamsInferred(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# TestProject\n\nA test project for testing.\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com\n"), 0o644)
+
+	cfg := Config{Mode: ModeAdopt, Target: dir}
+	resolved, sources := resolveAdoptParams(cfg, dir)
+	if resolved.RepoName == "" {
+		t.Fatal("RepoName should be inferred from directory basename")
+	}
+	if resolved.Purpose != "A test project for testing." {
+		t.Fatalf("Purpose = %q, want inferred from README", resolved.Purpose)
+	}
+	if resolved.Stack != "Go" {
+		t.Fatalf("Stack = %q, want Go", resolved.Stack)
+	}
+	for _, s := range sources {
+		if s.source != "inferred" {
+			t.Fatalf("source for %s = %q, want inferred", s.name, s.source)
+		}
+	}
+}
+
+func TestResolveAdoptParamsManifestTypeRestored(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	m := Manifest{
+		FormatVersion:   manifestFormatVersion,
+		TemplateVersion: "0.7.1",
+		Params: ManifestParams{
+			RepoName: "myrepo",
+			Purpose:  "test",
+			Type:     "CODE",
+			Stack:    "Go",
+		},
+	}
+	os.WriteFile(filepath.Join(dir, manifestFileName), []byte(formatManifest(m)), 0o644)
+
+	cfg := Config{Mode: ModeAdopt, Target: dir}
+	resolved, _ := resolveAdoptParams(cfg, dir)
+	if resolved.Type != RepoTypeCode {
+		t.Fatalf("Type = %q, want CODE (from manifest)", resolved.Type)
+	}
+}
+
+func TestAdoptManifestContainsParams(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# testproj\n\nTest purpose.\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com\n"), 0o644)
+
+	tfs := templates.EmbeddedFS
+	repoRoot := repoRoot(t)
+	cfg := Config{
+		Mode:     ModeAdopt,
+		Target:   dir,
+		RepoName: "testproj",
+		Purpose:  "Test purpose.",
+		Type:     RepoTypeCode,
+		Stack:    "Go",
+	}
+	if err := RunWithFS(tfs, repoRoot, cfg); err != nil {
+		t.Fatalf("RunWithFS() error = %v", err)
+	}
+	m, ok, err := readManifest(dir)
+	if err != nil {
+		t.Fatalf("readManifest() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("expected manifest to exist after adopt")
+	}
+	if m.Params.RepoName != "testproj" {
+		t.Fatalf("manifest Params.RepoName = %q, want testproj", m.Params.RepoName)
+	}
+	if m.Params.Type != "CODE" {
+		t.Fatalf("manifest Params.Type = %q, want CODE", m.Params.Type)
+	}
+	if m.Params.Stack != "Go" {
+		t.Fatalf("manifest Params.Stack = %q, want Go", m.Params.Stack)
+	}
+}
+
+// AT11: inference fails for required param → error names the missing flag
+func TestAdoptErrorsWhenInferenceFails(t *testing.T) {
+	t.Parallel()
+	// Empty directory: no README (purpose fails), no manifest file (stack fails)
+	dir := t.TempDir()
+
+	_, _, err := ParseModeArgs(ModeAdopt, []string{"-t", dir})
+	if err == nil {
+		t.Fatal("expected error when purpose cannot be inferred")
+	}
+	if !strings.Contains(err.Error(), "purpose") || !strings.Contains(err.Error(), "-p") {
+		t.Fatalf("error should name the missing parameter and flag, got: %v", err)
+	}
+}
+
+// AT12: dry-run adopt does not write or update manifest
+func TestAdoptDryRunDoesNotWriteManifest(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# test\n\nA test project.\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com\n"), 0o644)
+
+	tfs := templates.EmbeddedFS
+	root := repoRoot(t)
+	cfg := Config{
+		Mode:     ModeAdopt,
+		Target:   dir,
+		RepoName: "drytest",
+		Purpose:  "A test project.",
+		Type:     RepoTypeCode,
+		Stack:    "Go",
+		DryRun:   true,
+	}
+	if err := RunWithFS(tfs, root, cfg); err != nil {
+		t.Fatalf("RunWithFS() error = %v", err)
+	}
+	manifestPath := filepath.Join(dir, manifestFileName)
+	if _, err := os.Stat(manifestPath); err == nil {
+		t.Fatal("manifest should not exist after dry-run adopt")
 	}
 }

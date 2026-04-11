@@ -186,6 +186,103 @@ func TestBuildManifestFromOperations(t *testing.T) {
 	}
 }
 
+func TestFormatParseManifestWithParams(t *testing.T) {
+	t.Parallel()
+	m := Manifest{
+		FormatVersion:   manifestFormatVersion,
+		TemplateVersion: "0.7.1",
+		Params: ManifestParams{
+			RepoName: "skout",
+			Purpose:  "decision-support CLI for Yahoo Fantasy Baseball",
+			Type:     "CODE",
+			Stack:    "Go",
+		},
+		Entries: []ManifestEntry{
+			{Path: "AGENTS.md", Kind: "file", Checksum: "aaa", SourcePath: "base/AGENTS.md", SourceChecksum: "bbb"},
+		},
+	}
+
+	text := formatManifest(m)
+	if !strings.Contains(text, "repo-name: skout") {
+		t.Fatalf("formatted manifest should contain repo-name, got:\n%s", text)
+	}
+	if !strings.Contains(text, "stack: Go") {
+		t.Fatalf("formatted manifest should contain stack, got:\n%s", text)
+	}
+
+	parsed, err := parseManifest(text)
+	if err != nil {
+		t.Fatalf("parseManifest() error = %v", err)
+	}
+	if parsed.Params.RepoName != "skout" {
+		t.Fatalf("Params.RepoName = %q, want skout", parsed.Params.RepoName)
+	}
+	if parsed.Params.Purpose != "decision-support CLI for Yahoo Fantasy Baseball" {
+		t.Fatalf("Params.Purpose = %q", parsed.Params.Purpose)
+	}
+	if parsed.Params.Type != "CODE" {
+		t.Fatalf("Params.Type = %q, want CODE", parsed.Params.Type)
+	}
+	if parsed.Params.Stack != "Go" {
+		t.Fatalf("Params.Stack = %q, want Go", parsed.Params.Stack)
+	}
+	if len(parsed.Entries) != 1 {
+		t.Fatalf("len(Entries) = %d, want 1", len(parsed.Entries))
+	}
+}
+
+func TestFormatParseManifestWithoutParams(t *testing.T) {
+	t.Parallel()
+	// Simulate a pre-AC26 manifest with no params
+	m := Manifest{
+		FormatVersion:   manifestFormatVersion,
+		TemplateVersion: "0.6.0",
+		Entries: []ManifestEntry{
+			{Path: "AGENTS.md", Kind: "file", Checksum: "aaa"},
+		},
+	}
+	text := formatManifest(m)
+	parsed, err := parseManifest(text)
+	if err != nil {
+		t.Fatalf("parseManifest() error = %v", err)
+	}
+	if parsed.Params.RepoName != "" {
+		t.Fatalf("Params.RepoName should be empty for legacy manifest, got %q", parsed.Params.RepoName)
+	}
+	if len(parsed.Entries) != 1 {
+		t.Fatalf("len(Entries) = %d, want 1", len(parsed.Entries))
+	}
+}
+
+func TestFormatParseManifestDocParams(t *testing.T) {
+	t.Parallel()
+	m := Manifest{
+		FormatVersion:   manifestFormatVersion,
+		TemplateVersion: "0.7.1",
+		Params: ManifestParams{
+			RepoName:           "myblog",
+			Purpose:            "personal blog",
+			Type:               "DOC",
+			PublishingPlatform: "Hugo",
+			Style:              "casual",
+		},
+	}
+	text := formatManifest(m)
+	parsed, err := parseManifest(text)
+	if err != nil {
+		t.Fatalf("parseManifest() error = %v", err)
+	}
+	if parsed.Params.PublishingPlatform != "Hugo" {
+		t.Fatalf("Params.PublishingPlatform = %q, want Hugo", parsed.Params.PublishingPlatform)
+	}
+	if parsed.Params.Style != "casual" {
+		t.Fatalf("Params.Style = %q, want casual", parsed.Params.Style)
+	}
+	if parsed.Params.Stack != "" {
+		t.Fatalf("Params.Stack should be empty for DOC, got %q", parsed.Params.Stack)
+	}
+}
+
 func mustWriteHelper(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

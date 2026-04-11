@@ -39,12 +39,10 @@ governa new -y DOC \
 **`adopt`** — apply governance to an existing repo with conservative behavior: fit assessment, proposal files instead of overwrites, and section-level `AGENTS.md` patching that adds only missing governed sections.
 
 ```bash
-governa adopt \
-  -n existing-repo \
-  -p "Short project purpose" \
-  -s "Go service" \
-  -d
+governa adopt -d
 ```
+
+Repo name, purpose, type, and stack are inferred from the target directory (directory basename, `README.md` first paragraph, manifest files). Explicit flags override inference: `-n`, `-p`, `-y`, `-s`. On re-adopt, stored parameters from the `.governa-manifest` are reused automatically.
 
 ### `enhance`
 Template-maintenance mode, run from inside this repo. The only mode that runs from governa itself and the only mode that can propose changes back into the template. Its purpose is to improve the entire templating set — base governance contract, overlays, and workflow patterns — that ships into all generated repos, as well as governa's own self-hosted governance.

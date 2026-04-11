@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"bufio"
 	"cmp"
 	"errors"
 	"flag"
@@ -189,7 +190,157 @@ func parseFlags(mode Mode, args []string) (Config, bool, error) {
 		DryRun:             values.dryRun,
 		Apply:              values.apply,
 	}
+	if mode == ModeAdopt {
+		resolved, sources := resolveAdoptParams(cfg, target)
+		cfg = resolved
+		printParamSources(sources)
+	}
 	return cfg, false, validateConfig(cfg)
+}
+
+func inferRepoName(targetDir string) string {
+	abs, err := filepath.Abs(targetDir)
+	if err != nil {
+		return filepath.Base(targetDir)
+	}
+	return filepath.Base(abs)
+}
+
+func inferPurpose(targetDir string) string {
+	path := filepath.Join(targetDir, "README.md")
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	foundContent := false
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			if foundContent {
+				// Blank line after content means end of first paragraph.
+				break
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		// Skip badge lines, HTML, and image links
+		if strings.HasPrefix(line, "![") || strings.HasPrefix(line, "<") || strings.HasPrefix(line, "[!") {
+			continue
+		}
+		foundContent = true
+		if len(line) > 200 {
+			return line[:200]
+		}
+		return line
+	}
+	return ""
+}
+
+var stackManifests = []struct {
+	file  string
+	stack string
+}{
+	{"go.mod", "Go"},
+	{"package.json", "Node"},
+	{"Cargo.toml", "Rust"},
+	{"pyproject.toml", "Python"},
+	{"pom.xml", "Java"},
+	{"build.gradle", "Java"},
+}
+
+func inferStack(targetDir string) string {
+	for _, sm := range stackManifests {
+		if _, err := os.Stat(filepath.Join(targetDir, sm.file)); err == nil {
+			return sm.stack
+		}
+	}
+	return ""
+}
+
+// resolveAdoptParams fills in missing adopt config fields using the priority:
+// explicit flag > manifest params > inference from target directory.
+// It returns the resolved config and a list of source annotations for display.
+func resolveAdoptParams(cfg Config, targetDir string) (Config, []paramSource) {
+	manifest, hasManifest, _ := readManifest(targetDir)
+	var sources []paramSource
+
+	if cfg.RepoName == "" {
+		if hasManifest && manifest.Params.RepoName != "" {
+			cfg.RepoName = manifest.Params.RepoName
+			sources = append(sources, paramSource{"repo-name", cfg.RepoName, "manifest"})
+		} else {
+			cfg.RepoName = inferRepoName(targetDir)
+			sources = append(sources, paramSource{"repo-name", cfg.RepoName, "inferred"})
+		}
+	} else {
+		sources = append(sources, paramSource{"repo-name", cfg.RepoName, "flag"})
+	}
+
+	if cfg.Purpose == "" {
+		if hasManifest && manifest.Params.Purpose != "" {
+			cfg.Purpose = manifest.Params.Purpose
+			sources = append(sources, paramSource{"purpose", cfg.Purpose, "manifest"})
+		} else {
+			cfg.Purpose = inferPurpose(targetDir)
+			if cfg.Purpose != "" {
+				sources = append(sources, paramSource{"purpose", cfg.Purpose, "inferred"})
+			}
+		}
+	} else {
+		sources = append(sources, paramSource{"purpose", cfg.Purpose, "flag"})
+	}
+
+	if cfg.Stack == "" {
+		if hasManifest && manifest.Params.Stack != "" {
+			cfg.Stack = manifest.Params.Stack
+			sources = append(sources, paramSource{"stack", cfg.Stack, "manifest"})
+		} else {
+			cfg.Stack = inferStack(targetDir)
+			if cfg.Stack != "" {
+				sources = append(sources, paramSource{"stack", cfg.Stack, "inferred"})
+			}
+		}
+	} else {
+		sources = append(sources, paramSource{"stack", cfg.Stack, "flag"})
+	}
+
+	if cfg.Type == "" && hasManifest && manifest.Params.Type != "" {
+		cfg.Type = RepoType(manifest.Params.Type)
+		sources = append(sources, paramSource{"type", string(cfg.Type), "manifest"})
+	}
+
+	if cfg.PublishingPlatform == "" && hasManifest && manifest.Params.PublishingPlatform != "" {
+		cfg.PublishingPlatform = manifest.Params.PublishingPlatform
+		sources = append(sources, paramSource{"publishing-platform", cfg.PublishingPlatform, "manifest"})
+	}
+
+	if cfg.Style == "" && hasManifest && manifest.Params.Style != "" {
+		cfg.Style = manifest.Params.Style
+		sources = append(sources, paramSource{"style", cfg.Style, "manifest"})
+	}
+
+	return cfg, sources
+}
+
+type paramSource struct {
+	name   string
+	value  string
+	source string // "flag", "manifest", "inferred"
+}
+
+func printParamSources(sources []paramSource) {
+	for _, s := range sources {
+		display := s.value
+		if len(display) > 80 {
+			display = display[:77] + "..."
+		}
+		fmt.Printf("%s: %s (%s)\n", s.name, display, s.source)
+	}
 }
 
 func validateConfig(cfg Config) error {
@@ -279,6 +430,14 @@ func runNewOrAdopt(tfs fs.FS, repoRoot string, cfg Config, adopt bool) error {
 
 	templateVersion := readTemplateVersion(repoRoot)
 	manifest := buildManifest(canonical, templateVersion, tfs, repoRoot, targetAbs)
+	manifest.Params = ManifestParams{
+		RepoName:           cfg.RepoName,
+		Purpose:            cfg.Purpose,
+		Type:               string(cfg.Type),
+		Stack:              cfg.Stack,
+		PublishingPlatform: cfg.PublishingPlatform,
+		Style:              cfg.Style,
+	}
 	manifestOp := operation{
 		kind:    "write",
 		path:    filepath.Join(targetAbs, manifestFileName),

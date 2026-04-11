@@ -3,6 +3,7 @@
 | Version | Summary |
 |---------|---------|
 | Unreleased | |
+| 0.7.2 | AC26: zero-flag adopt with auto-inferred params, manifest stores adopt parameters for idempotent re-adopt |
 | 0.7.1 | AC25: build-time governance drift check via enhance self-review, advisory summary after binary install |
 | 0.7.0 | AC24: renamed repokit to governa — module path, binary, docs, templates; legacy manifest backward compatible |
 | 0.6.4 | AC23: Using Adopt workflow in CODE overlay DEV role, drift summary for enhance and adopt output |
