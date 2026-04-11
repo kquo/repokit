@@ -3,6 +3,7 @@
 | Version | Summary |
 |---------|---------|
 | Unreleased | |
+| 0.8.1 | AC28: overlay color.go replaced with shared internal/color import, review doc always at repo root, finer review categories (cherry-pick vs no action likely), identical file detection, DEV role AC-file-first rule |
 | 0.8.0 | AC25–AC27: build-time drift check, zero-flag adopt with auto-inferred params, content-aware adopt review document replacing .template-proposed files |
 | 0.7.2 | AC26: zero-flag adopt with auto-inferred params, manifest stores adopt parameters for idempotent re-adopt |
 | 0.7.1 | AC25: build-time governance drift check via enhance self-review, advisory summary after binary install |

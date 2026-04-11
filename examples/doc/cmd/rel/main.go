@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+
+	"github.com/kquo/governa/examples/doc/internal/color"
 )
 
 var semverTagPattern = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
@@ -74,23 +76,23 @@ func runRelease(cfg relConfig) error {
 		return err
 	}
 
-	fmt.Printf("%s %s\n", yel("release tag:"), grn(cfg.tag))
-	fmt.Printf("%s %s\n", yel("release message:"), grn(fmt.Sprintf("%q", cfg.message)))
-	fmt.Printf("%s %s\n", yel("remote:"), cya("origin"))
+	fmt.Printf("%s %s\n", color.Yel("release tag:"), color.Grn(cfg.tag))
+	fmt.Printf("%s %s\n", color.Yel("release message:"), color.Grn(fmt.Sprintf("%q", cfg.message)))
+	fmt.Printf("%s %s\n", color.Yel("remote:"), color.Cya("origin"))
 
-	fmt.Println(yel("\nFiles that will be staged (git status):"))
+	fmt.Println(color.Yel("\nFiles that will be staged (git status):"))
 	if err := runGit("git status preview", "status", "--short"); err != nil {
 		return err
 	}
 
-	fmt.Println(yel("\nplan:"))
+	fmt.Println(color.Yel("\nplan:"))
 	fmt.Printf("- git add .\n")
 	fmt.Printf("- git commit -m %q\n", cfg.message)
 	fmt.Printf("- git tag %s\n", cfg.tag)
 	fmt.Printf("- git push origin %s\n", cfg.tag)
 	fmt.Printf("- git push origin\n")
 
-	ok, err := confirm(yel("Review the file list above. Proceed with release? (y/N): "))
+	ok, err := confirm(color.Yel("Review the file list above. Proceed with release? (y/N): "))
 	if err != nil {
 		return err
 	}
@@ -151,7 +153,7 @@ func confirm(prompt string) (bool, error) {
 }
 
 func runGit(name string, args ...string) error {
-	fmt.Printf("%s %s\n", yel("running:"), grn("git "+strings.Join(args, " ")))
+	fmt.Printf("%s %s\n", color.Yel("running:"), color.Grn("git "+strings.Join(args, " ")))
 	cmd := exec.Command("git", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

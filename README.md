@@ -36,10 +36,10 @@ governa new -y DOC \
   -v "Clear, factual, concise"
 ```
 
-**`adopt`** — apply governance to an existing repo with conservative behavior: fit assessment, content-aware collision scoring, and a single consolidated review document instead of scattered proposal files. New files are written directly; collisions are scored as `keep`, `review`, or `accept` and reported in a review doc.
+**`adopt`** — apply governance to an existing repo with conservative behavior: fit assessment, content-aware collision scoring, and a single `governa-adopt-review.md` at the repo root. New files are written directly; collisions are scored as `keep`, `review: cherry-pick`, or `review: no action likely`. Identical files are detected and marked as `keep`.
 
 ```bash
-governa adopt -d
+governa adopt
 ```
 
 Repo name, purpose, type, and stack are inferred from the target directory (directory basename, `README.md` first paragraph, manifest files). Explicit flags override inference: `-n`, `-p`, `-y`, `-s`. On re-adopt, stored parameters from the `.governa-manifest` are reused automatically.

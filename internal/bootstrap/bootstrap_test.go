@@ -1124,8 +1124,8 @@ func TestScoreOverlayCollisionReviewNewSections(t *testing.T) {
 	existing := filepath.Join(dir, "doc.md")
 	mustWrite(t, existing, "# Doc\n\n## A\ncontent\n")
 	score := scoreOverlayCollision(existing, "# Doc\n\n## A\ncontent\n## B\nnew content\n")
-	if score.recommendation != "review" {
-		t.Fatalf("recommendation = %q, want review", score.recommendation)
+	if score.recommendation != "review: cherry-pick" {
+		t.Fatalf("recommendation = %q, want review: cherry-pick", score.recommendation)
 	}
 	if len(score.missingSections) == 0 || score.missingSections[0] != "B" {
 		t.Fatalf("missingSections = %v, want [B]", score.missingSections)
@@ -1146,8 +1146,8 @@ func TestScoreOverlayCollisionReviewNonMarkdown(t *testing.T) {
 	existing := filepath.Join(dir, "build.sh")
 	mustWrite(t, existing, "#!/bin/bash\necho hello\n")
 	score := scoreOverlayCollision(existing, "#!/bin/bash\necho world\n")
-	if score.recommendation != "review" {
-		t.Fatalf("recommendation = %q, want review for non-markdown", score.recommendation)
+	if score.recommendation != "review: no action likely" {
+		t.Fatalf("recommendation = %q, want review: no action likely for non-markdown", score.recommendation)
 	}
 }
 
@@ -1361,9 +1361,8 @@ func TestPlanRenderNonGoStackSkipsGoFiles(t *testing.T) {
 	mustWrite(t, filepath.Join(root, "TEMPLATE_VERSION"), "0.1.0\n")
 	mustWrite(t, filepath.Join(root, "overlays", "code", "files", "README.md.tmpl"), "# README\n")
 	mustWrite(t, filepath.Join(root, "overlays", "code", "files", "cmd", "build", "main.go.tmpl"), "package main\n")
-	mustWrite(t, filepath.Join(root, "overlays", "code", "files", "cmd", "build", "color.go.tmpl"), "package main\n")
 	mustWrite(t, filepath.Join(root, "overlays", "code", "files", "cmd", "rel", "main.go.tmpl"), "package main\n")
-	mustWrite(t, filepath.Join(root, "overlays", "code", "files", "cmd", "rel", "color.go.tmpl"), "package main\n")
+	mustWrite(t, filepath.Join(root, "overlays", "code", "files", "internal", "color", "color.go.tmpl"), "package color\n")
 
 	cfg := Config{
 		Mode:     ModeNew,
@@ -1379,7 +1378,7 @@ func TestPlanRenderNonGoStackSkipsGoFiles(t *testing.T) {
 	}
 
 	for _, op := range ops {
-		if strings.HasSuffix(op.path, "main.go") || strings.HasSuffix(op.path, "color.go") {
+		if strings.HasSuffix(op.path, ".go") {
 			t.Fatalf("non-Go stack should not include Go files, found %q", op.path)
 		}
 	}
@@ -2586,12 +2585,12 @@ func TestAdoptPatchesMissingSections(t *testing.T) {
 		t.Fatal("should not create .template-proposed file")
 	}
 
-	// Review doc should exist with governance patch info
-	reviewDoc := findAdoptReviewDoc(t, filepath.Join(targetDir, "docs"))
-	if reviewDoc == "" {
-		t.Fatal("expected adopt review doc in docs/")
+	// Review doc should exist at repo root
+	reviewPath := filepath.Join(targetDir, "governa-adopt-review.md")
+	content, err := os.ReadFile(reviewPath)
+	if err != nil {
+		t.Fatalf("expected governa-adopt-review.md at repo root, got error: %v", err)
 	}
-	content, _ := os.ReadFile(reviewDoc)
 	if !strings.Contains(string(content), "AGENTS.md") {
 		t.Fatal("review doc should reference AGENTS.md")
 	}
@@ -2756,10 +2755,10 @@ func TestBootstrapAdoptProposesAgentRoles(t *testing.T) {
 		}
 	}
 
-	// Review doc should exist with collision entries
-	reviewDoc := findAdoptReviewDoc(t, filepath.Join(targetDir, "docs"))
-	if reviewDoc == "" {
-		t.Fatal("expected adopt review doc")
+	// Review doc should exist at repo root
+	reviewPath := filepath.Join(targetDir, "governa-adopt-review.md")
+	if _, err := os.Stat(reviewPath); err != nil {
+		t.Fatalf("expected governa-adopt-review.md, got error: %v", err)
 	}
 }
 
@@ -2841,12 +2840,9 @@ func TestBootstrapAdoptProposesEnrichedDocs(t *testing.T) {
 		t.Fatal("should not create .template-proposed for ac-example.md")
 	}
 
-	// Review doc should exist with collision entries
-	reviewDoc := findAdoptReviewDoc(t, filepath.Join(targetDir, "docs"))
-	if reviewDoc == "" {
-		t.Fatal("expected adopt review doc")
-	}
-	content, _ := os.ReadFile(reviewDoc)
+	// Review doc should exist at repo root with collision entries
+	reviewPath := filepath.Join(targetDir, "governa-adopt-review.md")
+	content, _ := os.ReadFile(reviewPath)
 	if !strings.Contains(string(content), "ac-example.md") || !strings.Contains(string(content), "build-release.md") {
 		t.Fatal("review doc should reference colliding files")
 	}
@@ -2947,30 +2943,11 @@ func TestBootstrapAdoptDocProposesEnrichedFiles(t *testing.T) {
 		}
 	}
 
-	// Review doc should exist (DOC repos without docs/ get root file)
-	reviewDoc := findAdoptReviewDoc(t, filepath.Join(targetDir, "docs"))
-	if reviewDoc == "" {
-		// Try root-level fallback
-		rootReview := filepath.Join(targetDir, "governa-adopt-review.md")
-		if _, err := os.Stat(rootReview); err != nil {
-			t.Fatal("expected adopt review doc")
-		}
+	// Review doc should exist at repo root
+	reviewPath := filepath.Join(targetDir, "governa-adopt-review.md")
+	if _, err := os.Stat(reviewPath); err != nil {
+		t.Fatal("expected governa-adopt-review.md at repo root")
 	}
-}
-
-func findAdoptReviewDoc(t *testing.T, docsDir string) string {
-	t.Helper()
-	entries, err := os.ReadDir(docsDir)
-	if err != nil {
-		return ""
-	}
-	for _, entry := range entries {
-		name := entry.Name()
-		if strings.HasPrefix(name, "ac") && strings.Contains(name, "governa-adopt") && strings.HasSuffix(name, ".md") {
-			return filepath.Join(docsDir, name)
-		}
-	}
-	return ""
 }
 
 func mustWrite(t *testing.T, path, content string) {

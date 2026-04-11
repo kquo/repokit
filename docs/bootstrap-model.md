@@ -214,10 +214,10 @@ Adoption mode should avoid clobbering an existing repo.
 Rules:
 
 - never overwrite an existing file silently
-- if a target file already exists, score the collision using content-aware comparison (line count ratio, section count, missing sections) and classify as `keep` (existing is more developed), `review` (proposed may add value), or `accept` (file is new)
-- report all collisions in a single consolidated review document (`docs/acN-governa-adopt.md` if `docs/` exists, `governa-adopt-review.md` at repo root otherwise) — no `.template-proposed` files are written
-- for markdown files: existing ≥2x lines → `keep`; existing has more sections → `keep`; proposed adds missing sections → `review`
-- for non-markdown files: existing collisions default to `review` for operator judgment
+- if a target file already exists, score the collision using content-aware comparison (line count ratio, section count, missing sections) and classify as: `keep` (existing is more developed or identical to template), `review: cherry-pick` (proposed adds sections worth considering), or `review: no action likely` (structurally different but not clearly better)
+- report all collisions in `governa-adopt-review.md` at the repo root — no `.template-proposed` files are written
+- for markdown files: identical content → `keep`; existing ≥2x lines → `keep`; existing has more sections → `keep`; proposed adds missing sections → `review: cherry-pick`; otherwise → `review: no action likely`
+- for non-markdown files: existing collisions default to `review: no action likely` for operator judgment
 - never rewrite an existing `AGENTS.md` wholesale unless the user explicitly requests replacement
 - preserve unrelated local changes
 

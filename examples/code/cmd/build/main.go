@@ -15,6 +15,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/kquo/governa/examples/code/internal/color"
 )
 
 type buildConfig struct {
@@ -100,26 +102,26 @@ func runBuild(cfg buildConfig) error {
 	ext := binaryExt()
 	scopes := packageScopes(cfg.targets)
 
-	fmt.Println(yel("==> Update go.mod to reflect actual dependencies"))
+	fmt.Println(color.Yel("==> Update go.mod to reflect actual dependencies"))
 	if err := runStreaming("go", "mod", "tidy"); err != nil {
 		return err
 	}
 
-	fmt.Println("\n" + yel("==> Format Go code according to standard rules"))
+	fmt.Println("\n" + color.Yel("==> Format Go code according to standard rules"))
 	if output := runCapturedSoft("go", append([]string{"fmt"}, scopes...)...); strings.TrimSpace(output) == "" {
 		fmt.Println("    No formatting changes needed.")
 	} else {
 		writeIndented(output)
 	}
 
-	fmt.Println("\n" + yel("==> Automatically fix Go code for API/language changes"))
+	fmt.Println("\n" + color.Yel("==> Automatically fix Go code for API/language changes"))
 	if output := runCapturedSoft("go", append([]string{"fix"}, scopes...)...); strings.TrimSpace(output) == "" {
 		fmt.Println("    No fixes applied.")
 	} else {
 		writeIndented(output)
 	}
 
-	fmt.Println("\n" + yel("==> Check code for potential issues"))
+	fmt.Println("\n" + color.Yel("==> Check code for potential issues"))
 	if output, failed := runCapturedCheck("go", append([]string{"vet"}, scopes...)...); failed {
 		writeIndented(output)
 		return fmt.Errorf("go vet found issues")
@@ -137,7 +139,7 @@ func runBuild(cfg buildConfig) error {
 	coverFile.Close()
 	defer os.Remove(coverPath)
 
-	fmt.Println("\n" + yel("==> Run tests for all packages in the repository"))
+	fmt.Println("\n" + color.Yel("==> Run tests for all packages in the repository"))
 	testArgs := []string{"test"}
 	if cfg.verbose {
 		testArgs = append(testArgs, "-v")
@@ -151,13 +153,13 @@ func runBuild(cfg buildConfig) error {
 		return err
 	}
 
-	fmt.Println("\n" + yel("==> Ensure staticcheck is available"))
+	fmt.Println("\n" + color.Yel("==> Ensure staticcheck is available"))
 	staticcheckPath, err := ensureStaticcheck()
 	if err != nil {
 		return err
 	}
 
-	fmt.Println("\n" + yel("==> Analyze Go code for potential issues"))
+	fmt.Println("\n" + color.Yel("==> Analyze Go code for potential issues"))
 	if output, failed := runCapturedCheck(staticcheckPath, scopes...); failed {
 		writeIndented(output)
 		return fmt.Errorf("staticcheck found issues")
@@ -172,32 +174,32 @@ func runBuild(cfg buildConfig) error {
 		return err
 	}
 	if len(cfg.targets) == 0 {
-		fmt.Println("\n" + yel("==> Building all utilities"))
+		fmt.Println("\n" + color.Yel("==> Building all utilities"))
 	} else {
-		fmt.Printf("\n%s %s\n", yel("==> Building specific utilities:"), grn(strings.Join(cfg.targets, " ")))
+		fmt.Printf("\n%s %s\n", color.Yel("==> Building specific utilities:"), color.Grn(strings.Join(cfg.targets, " ")))
 	}
 	if shouldSkipBinaryInstall(cfg.targets) {
-		fmt.Printf("    %s %s\n", yel("Skipping binary install for"), cya(joinScriptOnlyTargets(cfg.targets)+"; run them with go run for now."))
+		fmt.Printf("    %s %s\n", color.Yel("Skipping binary install for"), color.Cya(joinScriptOnlyTargets(cfg.targets)+"; run them with go run for now."))
 	}
 	if len(targets) > 0 {
-		fmt.Println("\n" + yel("==> Validate programVersion declarations"))
+		fmt.Println("\n" + color.Yel("==> Validate programVersion declarations"))
 		if err := validateProgramVersions(targets); err != nil {
 			return err
 		}
 	}
 	for _, target := range targets {
 		outputPath := filepath.Join(binDir, target+ext)
-		fmt.Printf("\n%s %s\n", yel("==> Building and installing"), grn(target))
+		fmt.Printf("\n%s %s\n", color.Yel("==> Building and installing"), color.Grn(target))
 		if err := runStreaming("go", "build", "-o", outputPath, "-ldflags", "-s -w", "./cmd/"+target); err != nil {
 			return err
 		}
-		fmt.Printf("    installed: %s\n", cya(outputPath))
+		fmt.Printf("    installed: %s\n", color.Cya(outputPath))
 	}
 
 	if nextTag, ok, err := nextPatchTag(); err != nil {
 		return err
 	} else if ok {
-		fmt.Printf("\n%s\n\n    go run ./cmd/rel %s %s\n", yel("==> To release, run:"), grn(nextTag), gra("\"<release message>\""))
+		fmt.Printf("\n%s\n\n    go run ./cmd/rel %s %s\n", color.Yel("==> To release, run:"), color.Grn(nextTag), color.Gra("\"<release message>\""))
 	}
 	return nil
 }
@@ -322,17 +324,17 @@ func validateProgramVersions(targets []string) error {
 		if ver == "" {
 			return fmt.Errorf("cmd/%s/main.go must declare a non-empty const programVersion string literal", target)
 		}
-		fmt.Printf("    %s: programVersion = %s\n", cya("cmd/"+target), grn(fmt.Sprintf("%q", ver)))
+		fmt.Printf("    %s: programVersion = %s\n", color.Cya("cmd/"+target), color.Grn(fmt.Sprintf("%q", ver)))
 	}
 	return nil
 }
 
 func ensureStaticcheck() (string, error) {
 	if path, err := exec.LookPath("staticcheck"); err == nil {
-		fmt.Printf("    found: %s\n", cya(path))
+		fmt.Printf("    found: %s\n", color.Cya(path))
 		return path, nil
 	}
-	fmt.Printf("    installing: %s\n", grn("honnef.co/go/tools/cmd/staticcheck@latest"))
+	fmt.Printf("    installing: %s\n", color.Grn("honnef.co/go/tools/cmd/staticcheck@latest"))
 	if err := runStreaming("go", "install", "honnef.co/go/tools/cmd/staticcheck@latest"); err != nil {
 		return "", err
 	}
@@ -378,14 +380,14 @@ func printCoverageSummary(coverPath, modulePath string) error {
 		return err
 	}
 	coverageText := fmt.Sprintf("domain coverage: %.1f%%", domainPct)
-	styledCoverage := red(coverageText)
+	styledCoverage := color.Red(coverageText)
 	switch {
 	case domainPct >= 75:
-		styledCoverage = grn(coverageText)
+		styledCoverage = color.Grn(coverageText)
 	case domainPct >= 50:
-		styledCoverage = yel(coverageText)
+		styledCoverage = color.Yel(coverageText)
 	}
-	fmt.Printf("    %s  %s\n", styledCoverage, gra("(total: "+total+")"))
+	fmt.Printf("    %s  %s\n", styledCoverage, color.Gra("(total: "+total+")"))
 	return nil
 }
 
@@ -500,7 +502,7 @@ func runCapturedCheck(name string, args ...string) (string, bool) {
 
 func runStreaming(name string, args ...string) error {
 	command := strings.TrimSpace(name + " " + strings.Join(args, " "))
-	fmt.Printf("    %s\n", grn(command))
+	fmt.Printf("    %s\n", color.Grn(command))
 	cmd := exec.Command(name, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -515,7 +517,7 @@ func writeIndented(text string) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.Contains(line, "FAIL") {
-			line = red(line)
+			line = color.Red(line)
 		}
 		fmt.Printf("    %s\n", line)
 	}
