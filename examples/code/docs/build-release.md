@@ -12,10 +12,14 @@ If this repo also includes `cmd/bootstrap/main.go`, treat it as a `go run` maint
 
 ## Minimum Validation
 
-- formatting passes
+- formatting passes — `go fmt` reformats are build-breaking, not warnings
 - lint or static checks pass if present
 - automated tests pass
 - changed docs match actual behavior
+
+## Acceptance Test Labeling
+
+Every acceptance test in an AC document must be labeled `[Automated]` or `[Manual]`. Default to `[Automated]` when verifiable from CLI output, test assertions, or file inspection. Use `[Manual]` only when live user action is required to confirm the result.
 
 ## Release Trigger
 
@@ -40,7 +44,7 @@ Before offering a release commit or release command:
 4. update `CHANGELOG.md` or the repo's release-history artifact
 5. confirm the repo's version artifact matches the intended release version
 6. remove or reprioritize completed roadmap items in `plan.md`
-7. remove completed AC files — consolidate their decisions into durable docs and delete the AC files before release; release prep is not complete while completed AC files remain (keep `ac-template.md` and designated teaching artifacts such as `ac-example.md`)
+7. remove completed AC files — consolidate their decisions into durable docs and delete the AC files before release; release prep is not complete while completed AC files remain (keep `ac-template.md`)
 8. prepare the exact tag and release message — the release message should be a single concise line, 80 characters or fewer
 9. present the canonical release command for the user to run or approve
 

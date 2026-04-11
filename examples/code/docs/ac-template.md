@@ -1,6 +1,6 @@
-> Save as `docs/acN-short-slug.md` (sequential N, kebab-case slug).
+Copy this file to `docs/acN-short-slug.md`, where `N` is the next sequential AC number and `short-slug` is a kebab-case identifier. Set the file's heading to `# AC<N> Title`.
 
-Copy this file to start a new AC. The AC is the implementation contract for one approved roadmap item. The full development cycle that wraps around this template lives in `docs/development-cycle.md`. The enforceable rules around when to draft, review, and integrate an AC live in `AGENTS.md`.
+The AC is the implementation contract for one approved roadmap item. The full development cycle that wraps around this template lives in `docs/development-cycle.md`. The enforceable rules around when to draft, review, and integrate an AC live in `AGENTS.md`.
 
 # AC<N> Title
 
@@ -19,7 +19,7 @@ Describe the change in one short paragraph.
 
 ## In Scope
 
-List the concrete changes this AC will make. Use sub-headings for grouping. Be specific — file paths, function names, table columns. The In Scope list is the authoritative scope contract.
+List the concrete changes this AC will make. Use sub-headings for grouping (e.g. "New files", "Modified files", "Schema changes"). Be specific — file paths, function names, table columns. The In Scope list is the authoritative scope contract.
 
 ### New files
 
@@ -49,7 +49,7 @@ List things the AC explicitly does **not** do. This is as important as the In Sc
 
 ## Acceptance Tests
 
-Every AT must be labeled `[Automated]` or `[Manual]`.
+Every AT must be labeled `[Automated]` or `[Manual]` (see `docs/build-release.md` for the labeling convention).
 
 **AT1** [Automated] — One-line description of what is verified, with the exact check (file existence, grep pattern, SQL query, or CLI output).
 
@@ -69,4 +69,4 @@ List the docs that must be updated as part of this AC. If a change touches code 
 
 `PENDING` — awaiting user authorization to begin implementation.
 
-(Other valid states: `IN PROGRESS`, `DEFERRED` (with reason). Completed ACs are deleted at release time per the development cycle — do not change status to DONE before deletion.)
+(Other valid states: `IN PROGRESS`, `DEFERRED` (with reason and tracking ref). For partial completion, list status by phase. Completed ACs are deleted at release time per the development cycle — do not change status to DONE before deletion.)

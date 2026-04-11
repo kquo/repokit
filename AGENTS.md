@@ -1,5 +1,7 @@
 # AGENTS.md
 
+This file is the governance contract for this repo and the only doc guaranteed to be loaded every agent session. `CLAUDE.md` is a symlink to this file. Other `docs/*.md` files are supplementary and loaded on demand.
+
 ## Purpose
 
 This file is the base governance contract for a generated repo.
@@ -20,6 +22,7 @@ Only these sections may be edited through a guided update:
 - `File-Change Discipline`
 - `Release Or Publish Triggers`
 - `Documentation Update Expectations`
+- `Project Rules`
 
 Do not add new sections, reorder sections, or rewrite the whole file unless the user explicitly asks for a contract change to this template itself.
 Treat this file as a governed config artifact, not freeform prose.
@@ -38,6 +41,7 @@ When asked to update it, propose the exact section names to change and keep edit
 - Authorization is per-scope. A user approving a change once does not authorize future changes by analogy.
 - Do not create, delete, rename, publish, release, or perform destructive changes without explicit user approval.
 - Do not change governance files, CI/release configuration, secrets handling, or external integrations without explicit user approval.
+- Use an AC-first workflow for non-trivial changes. Before implementation, draft an AC doc (`docs/acN-short-slug.md`) that defines scope, out-of-scope, objective fit, and required tests. Use `docs/ac-template.md` as the starting point if available. Do not begin implementation until the AC is reviewed and the user authorizes it.
 - Normal in-scope edits to existing project files are allowed once the user has asked for implementation.
 - If a request is ambiguous and the change would be hard to reverse, stop and ask.
 
@@ -77,3 +81,13 @@ When asked to update it, propose the exact section names to change and keep edit
 - Update architecture, planning, or style docs only when the change materially affects them.
 - Do not let docs silently drift from the implemented or published reality.
 - Every AC doc must end with a `## Status` section. Valid states: `PENDING`, `IN PROGRESS`, `DEFERRED` (with reason). Completed ACs are deleted per the development cycle — do not change status to DONE before deletion.
+
+## Project Rules
+
+- Always use the repo's canonical build command (`./build.sh` or equivalent) — never run individual tool commands directly. See `docs/build-release.md` for the full pipeline.
+- Follow semver: PATCH for changes invisible to users (bug fixes, refactors, tooling). MINOR for user-visible changes (commands, flags, schema, behavioral). Batch PATCH-level changes when possible.
+- Pin dependencies to explicit versions. Do not stay on an older version without a documented reason.
+- Follow existing repo patterns unless a clear improvement is approved.
+- Every new feature or logic change must include tests in the same pass.
+- Wrap user-facing errors with operation context and recovery guidance.
+- Every AC must label each acceptance test as `[Automated]` or `[Manual]`. See `docs/ac-template.md`.

@@ -400,7 +400,6 @@ func TestNextACNumber(t *testing.T) {
 	mustWrite(t, filepath.Join(dir, "ac1-first.md"), "# AC\n")
 	mustWrite(t, filepath.Join(dir, "ac3-third.md"), "# AC\n")
 	mustWrite(t, filepath.Join(dir, "ac-template.md"), "# Template\n")
-	mustWrite(t, filepath.Join(dir, "ac-example.md"), "# Example\n")
 	mustWrite(t, filepath.Join(dir, "ac-001-old.md"), "# Old format\n")
 	mustWrite(t, filepath.Join(dir, "other.md"), "# Other\n")
 
@@ -423,7 +422,6 @@ func TestIsWorkingACFile(t *testing.T) {
 		{"ac10-foo.md", true},
 		{"ac100-foo.md", true},
 		{"ac-template.md", false},
-		{"ac-example.md", false},
 		{"ac-001-foo.md", false},
 		{"acfoo.md", false},
 		{"ac1.md", false},
@@ -443,7 +441,7 @@ func TestIsACKeeperFile(t *testing.T) {
 		want bool
 	}{
 		{"ac-template.md", true},
-		{"ac-example.md", true},
+		{"ac-example.md", false},
 		{"ac1-foo.md", false},
 		{"ac-001-foo.md", false},
 		{"random.md", false},
@@ -2782,14 +2780,9 @@ func TestBootstrapNewProducesEnrichedDocs(t *testing.T) {
 		t.Fatalf("runNewOrAdopt() error = %v", err)
 	}
 
-	// ac-example.md should exist
-	examplePath := filepath.Join(targetDir, "docs", "ac-example.md")
-	if _, err := os.Stat(examplePath); err != nil {
-		t.Fatalf("expected docs/ac-example.md, got error: %v", err)
-	}
-	exampleContent, _ := os.ReadFile(examplePath)
-	if !strings.Contains(string(exampleContent), "EXAMPLE") {
-		t.Fatal("ac-example.md should be clearly marked as an example")
+	// ac-example.md should NOT exist (removed in AC29)
+	if _, err := os.Stat(filepath.Join(targetDir, "docs", "ac-example.md")); err == nil {
+		t.Fatal("ac-example.md should not be generated")
 	}
 
 	// build-release.md should contain new sections
@@ -2812,8 +2805,7 @@ func TestBootstrapAdoptProposesEnrichedDocs(t *testing.T) {
 	templateRoot, _ := filepath.Abs("../..")
 	targetDir := t.TempDir()
 
-	// Pre-create files so adopt proposes them
-	mustWrite(t, filepath.Join(targetDir, "docs", "ac-example.md"), "# Old example\n")
+	// Pre-create files so adopt collides on them
 	mustWrite(t, filepath.Join(targetDir, "docs", "build-release.md"), "# Old build release\n")
 	mustWrite(t, filepath.Join(targetDir, "AGENTS.md"), "# AGENTS.md\n\n## Purpose\n\nP.\n\n## Governed Sections\n\nG.\n\n## Interaction Mode\n\nI.\n\n## Approval Boundaries\n\nA.\n\n## Review Style\n\nR.\n\n## File-Change Discipline\n\nF.\n\n## Release Or Publish Triggers\n\nT.\n\n## Documentation Update Expectations\n\nD.\n")
 
@@ -2829,21 +2821,10 @@ func TestBootstrapAdoptProposesEnrichedDocs(t *testing.T) {
 		t.Fatalf("runNewOrAdopt() error = %v", err)
 	}
 
-	// Originals preserved
-	oldExample, _ := os.ReadFile(filepath.Join(targetDir, "docs", "ac-example.md"))
-	if !strings.Contains(string(oldExample), "Old example") {
-		t.Fatal("adopt should preserve existing ac-example.md")
-	}
-
-	// No .template-proposed files
-	if _, err := os.Stat(filepath.Join(targetDir, "docs", "ac-example.template-proposed.md")); err == nil {
-		t.Fatal("should not create .template-proposed for ac-example.md")
-	}
-
 	// Review doc should exist at repo root with collision entries
 	reviewPath := filepath.Join(targetDir, "governa-adopt-review.md")
 	content, _ := os.ReadFile(reviewPath)
-	if !strings.Contains(string(content), "ac-example.md") || !strings.Contains(string(content), "build-release.md") {
+	if !strings.Contains(string(content), "build-release.md") {
 		t.Fatal("review doc should reference colliding files")
 	}
 }
@@ -3659,38 +3640,6 @@ func TestACTemplateEnrichedStructure(t *testing.T) {
 	}
 }
 
-func TestACExampleEnrichedStructure(t *testing.T) {
-	t.Parallel()
-	examplePaths := []string{
-		"internal/templates/overlays/code/files/docs/ac-example.md.tmpl",
-		"examples/code/docs/ac-example.md",
-	}
-	for _, path := range examplePaths {
-		content := readRepoFile(t, path)
-
-		// Summary before Objective Fit (ordering matches template).
-		summaryIdx := strings.Index(content, "## Summary")
-		objFitIdx := strings.Index(content, "## Objective Fit")
-		if summaryIdx < 0 {
-			t.Errorf("%s: missing ## Summary", path)
-		} else if objFitIdx < 0 {
-			t.Errorf("%s: missing ## Objective Fit", path)
-		} else if summaryIdx >= objFitIdx {
-			t.Errorf("%s: ## Summary (at %d) must appear before ## Objective Fit (at %d)", path, summaryIdx, objFitIdx)
-		}
-
-		// Numbered AT format.
-		if !strings.Contains(content, "**AT1**") {
-			t.Errorf("%s: should contain numbered AT format (**AT1**)", path)
-		}
-
-		// Sub-headings under In Scope.
-		if !strings.Contains(content, "### New files") {
-			t.Errorf("%s: should contain ### New files sub-heading under In Scope", path)
-		}
-	}
-}
-
 func TestGovernanceImprovementsFromSkout(t *testing.T) {
 	t.Parallel()
 	agentsPaths := []string{
@@ -4244,5 +4193,132 @@ func TestAdoptDryRunDoesNotWriteManifest(t *testing.T) {
 	manifestPath := filepath.Join(dir, manifestFileName)
 	if _, err := os.Stat(manifestPath); err == nil {
 		t.Fatal("manifest should not exist after dry-run adopt")
+	}
+}
+
+// --- AC29 tests ---
+
+func TestBaseAgentsMdHasPreamble(t *testing.T) {
+	t.Parallel()
+	content := readRepoFile(t, "internal/templates/base/AGENTS.md")
+	if !strings.Contains(content, "only doc guaranteed to be loaded every agent session") {
+		t.Fatal("base AGENTS.md should contain session-loading preamble")
+	}
+}
+
+func TestBaseAgentsMdHasProjectRules(t *testing.T) {
+	t.Parallel()
+	content := readRepoFile(t, "internal/templates/base/AGENTS.md")
+	if !strings.Contains(content, "## Project Rules") {
+		t.Fatal("base AGENTS.md should contain ## Project Rules section")
+	}
+	// Must be flat bullets, no subsections
+	idx := strings.Index(content, "## Project Rules")
+	rest := content[idx:]
+	nextSection := strings.Index(rest[1:], "\n## ")
+	if nextSection > 0 {
+		rest = rest[:nextSection+1]
+	}
+	if strings.Contains(rest, "### ") {
+		t.Fatal("Project Rules should use flat bullets, not ### subsections")
+	}
+}
+
+func TestProjectRulesInGovernedSectionList(t *testing.T) {
+	t.Parallel()
+	content := readRepoFile(t, "internal/templates/base/AGENTS.md")
+	if !strings.Contains(content, "`Project Rules`") {
+		t.Fatal("Project Rules should appear in the governed section list")
+	}
+}
+
+func TestCodeOverlayDevMdHasResponseStyle(t *testing.T) {
+	t.Parallel()
+	content := readRepoFile(t, "internal/templates/overlays/code/files/docs/agent-roles/dev.md.tmpl")
+	if !strings.Contains(content, "terse") || !strings.Contains(content, "Review Style") {
+		t.Fatal("CODE overlay dev.md should contain response style expectations referencing Review Style")
+	}
+}
+
+func TestCodeOverlayBuildReleaseMdHasATLabeling(t *testing.T) {
+	t.Parallel()
+	content := readRepoFile(t, "internal/templates/overlays/code/files/docs/build-release.md.tmpl")
+	if !strings.Contains(content, "[Automated]") || !strings.Contains(content, "[Manual]") {
+		t.Fatal("CODE overlay build-release.md should contain AT labeling convention")
+	}
+}
+
+func TestShouldSkipKnowledgeDirNoDir(t *testing.T) {
+	t.Parallel()
+	if !shouldSkipKnowledgeDir(t.TempDir()) {
+		t.Fatal("should skip when docs/knowledge/ does not exist")
+	}
+}
+
+func TestShouldSkipKnowledgeDirOnlyReadme(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "docs", "knowledge", "README.md"), "# Index\n")
+	if !shouldSkipKnowledgeDir(dir) {
+		t.Fatal("should skip when docs/knowledge/ has only README.md")
+	}
+}
+
+func TestShouldSkipKnowledgeDirWithContent(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "docs", "knowledge", "README.md"), "# Index\n")
+	mustWrite(t, filepath.Join(dir, "docs", "knowledge", "deep-topic.md"), "# Topic\n")
+	if shouldSkipKnowledgeDir(dir) {
+		t.Fatal("should not skip when docs/knowledge/ has real content")
+	}
+}
+
+func TestScoreOverlayCollisionIdentical(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	content := "# Same\n\n## Section\n\ncontent\n"
+	existing := filepath.Join(dir, "doc.md")
+	mustWrite(t, existing, content)
+	score := scoreOverlayCollision(existing, content)
+	if score.recommendation != "keep" {
+		t.Fatalf("recommendation = %q, want keep for identical", score.recommendation)
+	}
+	if !strings.Contains(score.reason, "identical") {
+		t.Fatalf("reason = %q, want 'identical to template'", score.reason)
+	}
+}
+
+func TestScoreOverlayCollisionSameCountDifferentNames(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	existing := filepath.Join(dir, "doc.md")
+	mustWrite(t, existing, "# Doc\n\n## Build\ncontent\n## Release\ncontent\n## Tests\ncontent\n")
+	proposed := "# Doc\n\n## Build And Test Rules\ncontent\n## Release Trigger\ncontent\n## Release Checklist\ncontent\n"
+	score := scoreOverlayCollision(existing, proposed)
+	if score.recommendation != "keep" {
+		t.Fatalf("recommendation = %q, want keep (same section count, different names)", score.recommendation)
+	}
+}
+
+func TestCompareStructureDetectsSubsections(t *testing.T) {
+	t.Parallel()
+	existing := "## Interaction Mode\n\n### Role Selection\n\n- rule\n- rule\n"
+	proposed := "## Interaction Mode\n\n- rule\n- rule\n"
+	notes := compareStructure(existing, proposed)
+	if len(notes) != 1 {
+		t.Fatalf("expected 1 structural note, got %d", len(notes))
+	}
+	if notes[0].section != "Interaction Mode" {
+		t.Fatalf("section = %q, want Interaction Mode", notes[0].section)
+	}
+}
+
+func TestCompareStructureSameStructureNoNotes(t *testing.T) {
+	t.Parallel()
+	content := "## Section\n\n- bullet\n- bullet\n"
+	notes := compareStructure(content, content)
+	if len(notes) != 0 {
+		t.Fatalf("expected 0 structural notes for same structure, got %d", len(notes))
 	}
 }

@@ -43,6 +43,7 @@ var governedSectionNames = []string{
 	"File-Change Discipline",
 	"Release Or Publish Triggers",
 	"Documentation Update Expectations",
+	"Project Rules",
 }
 
 type Config struct {
@@ -982,6 +983,12 @@ func planCanonical(tfs fs.FS, repoRoot string, cfg Config, targetRoot string) ([
 		if strings.HasPrefix(rel, "internal/color/") && modulePath == "" {
 			return nil
 		}
+		// Skip docs/knowledge/README.md if the target doesn't use docs/knowledge/
+		if rel == "docs/knowledge/README.md.tmpl" || rel == "docs/knowledge/README.md" {
+			if shouldSkipKnowledgeDir(targetRoot) {
+				return nil
+			}
+		}
 		targetRel := strings.TrimSuffix(rel, ".tmpl")
 		content, err := readAndRender(tfs, path, placeholders)
 		if err != nil {
@@ -1866,7 +1873,7 @@ func isWorkingACFile(name string) bool {
 }
 
 func isACKeeperFile(name string) bool {
-	return name == "ac-template.md" || name == "ac-example.md"
+	return name == "ac-template.md"
 }
 
 func nextACNumber(docsDir string) (int, error) {
@@ -2021,6 +2028,13 @@ func countEnhancementCandidates(candidates []EnhancementCandidate) map[string]in
 	return counts
 }
 
+type structuralNote struct {
+	section      string
+	observation  string
+	existingBody string
+	templateBody string
+}
+
 type collisionScore struct {
 	path             string // target file path
 	recommendation   string // "keep", "review: cherry-pick", "review: no action likely", "accept"
@@ -2029,9 +2043,10 @@ type collisionScore struct {
 	proposedLines    int
 	existingSections int
 	proposedSections int
-	missingSections  []string // sections in proposed but not in existing
-	proposedContent  string   // the template content for the review doc
-	governancePatch  string   // non-empty if this is an AGENTS.md patch with missing sections
+	missingSections  []string         // sections in proposed but not in existing
+	proposedContent  string           // the template content for the review doc
+	governancePatch  string           // non-empty if this is an AGENTS.md patch with missing sections
+	structuralNotes  []structuralNote // section-level structural observations
 }
 
 func countLines(s string) int {
@@ -2099,6 +2114,9 @@ func scoreOverlayCollision(existingPath string, proposedContent string) collisio
 		}
 	}
 
+	// Structural comparison for matching sections
+	score.structuralNotes = compareStructure(existingContent, proposedContent)
+
 	// Decision rules
 	if score.existingLines >= 2*score.proposedLines {
 		score.recommendation = "keep"
@@ -2108,6 +2126,14 @@ func scoreOverlayCollision(existingPath string, proposedContent string) collisio
 	if score.existingSections > score.proposedSections {
 		score.recommendation = "keep"
 		score.reason = fmt.Sprintf("existing has richer structure (%d sections vs %d proposed)", score.existingSections, score.proposedSections)
+		return score
+	}
+	// When existing has at least as many sections as proposed, different section
+	// names likely mean the existing file covers the same content under more
+	// specific headings — not a real cherry-pick opportunity.
+	if score.existingSections >= score.proposedSections && len(score.missingSections) > 0 {
+		score.recommendation = "keep"
+		score.reason = fmt.Sprintf("existing covers same content under different headings (%d sections vs %d proposed)", score.existingSections, score.proposedSections)
 		return score
 	}
 	if len(score.missingSections) > 0 {
@@ -2175,14 +2201,7 @@ func renderAdoptReview(scores []collisionScore) string {
 	fmt.Fprintln(&b, "| File | Recommendation | Reason | Existing Lines | Proposed Lines |")
 	fmt.Fprintln(&b, "|------|----------------|--------|---------------|----------------|")
 	for _, s := range scores {
-		rel := filepath.Base(s.path)
-		// Try to get a more useful relative path
-		if idx := strings.Index(s.path, "/docs/"); idx >= 0 {
-			rel = s.path[idx+1:]
-		} else if idx := strings.Index(s.path, "/cmd/"); idx >= 0 {
-			rel = s.path[idx+1:]
-		}
-		fmt.Fprintf(&b, "| `%s` | %s | %s | %d | %d |\n", rel, s.recommendation, s.reason, s.existingLines, s.proposedLines)
+		fmt.Fprintf(&b, "| `%s` | %s | %s | %d | %d |\n", scoreRelPath(s.path), s.recommendation, s.reason, s.existingLines, s.proposedLines)
 	}
 
 	// Action summary
@@ -2202,20 +2221,15 @@ func renderAdoptReview(scores []collisionScore) string {
 	fmt.Fprintf(&b, "- **review: cherry-pick**: %d files (proposed adds sections worth considering)\n", cherryPicks)
 	fmt.Fprintf(&b, "- **review: no action likely**: %d files (structurally different but not clearly better)\n", noAction)
 
-	if cherryPicks > 0 || noAction > 0 {
-		fmt.Fprintf(&b, "\n## Review Actions\n\n")
-		fmt.Fprintln(&b, "For each `review` file, compare the proposed content below against your existing file and cherry-pick useful additions.")
+	if cherryPicks > 0 {
+		fmt.Fprintf(&b, "\n## Cherry-Pick Candidates\n\n")
+		fmt.Fprintln(&b, "These files have sections or content worth considering. Compare against your existing file and cherry-pick useful additions.")
 		fmt.Fprintln(&b, "")
 		for _, s := range scores {
-			if !strings.HasPrefix(s.recommendation, "review") {
+			if s.recommendation != "review: cherry-pick" {
 				continue
 			}
-			rel := filepath.Base(s.path)
-			if idx := strings.Index(s.path, "/docs/"); idx >= 0 {
-				rel = s.path[idx+1:]
-			} else if idx := strings.Index(s.path, "/cmd/"); idx >= 0 {
-				rel = s.path[idx+1:]
-			}
+			rel := scoreRelPath(s.path)
 			if s.governancePatch != "" {
 				fmt.Fprintf(&b, "### `%s` (governance patch)\n\n", rel)
 				fmt.Fprintf(&b, "Missing governed sections: %s\n\n", strings.Join(s.missingSections, ", "))
@@ -2232,13 +2246,95 @@ func renderAdoptReview(scores []collisionScore) string {
 		}
 	}
 
+	// Structural notes
+	hasStructuralNotes := false
+	for _, s := range scores {
+		if len(s.structuralNotes) > 0 {
+			hasStructuralNotes = true
+			break
+		}
+	}
+	if hasStructuralNotes {
+		fmt.Fprintf(&b, "\n## Structural Observations\n\n")
+		fmt.Fprintln(&b, "The following sections use a more complex structure than the template version. Consider adopting the simpler format while preserving project-specific rules.")
+		fmt.Fprintln(&b, "")
+		for _, s := range scores {
+			for _, note := range s.structuralNotes {
+				fmt.Fprintf(&b, "### %s in `%s`\n\n", note.section, scoreRelPath(s.path))
+				fmt.Fprintf(&b, "%s\n\n", note.observation)
+				fmt.Fprintln(&b, "**Your version:**")
+				fmt.Fprintln(&b, "")
+				fmt.Fprintf(&b, "```markdown\n## %s\n\n%s\n```\n\n", note.section, note.existingBody)
+				fmt.Fprintln(&b, "**Template version:**")
+				fmt.Fprintln(&b, "")
+				fmt.Fprintf(&b, "```markdown\n## %s\n\n%s\n```\n\n", note.section, note.templateBody)
+			}
+		}
+	}
+
 	fmt.Fprintf(&b, "\n## Status\n\n`PENDING`\n")
 	return b.String()
+}
+
+// compareStructure checks matching ## sections for structural differences.
+// Returns notes where the template uses a simpler structure than the existing.
+func compareStructure(existingContent, proposedContent string) []structuralNote {
+	existingSections := parseLevel2Sections(existingContent)
+	proposedSections := parseLevel2Sections(proposedContent)
+	proposedMap := sectionMap(proposedSections)
+
+	var notes []structuralNote
+	for _, es := range existingSections {
+		proposedBody, exists := proposedMap[es.Name]
+		if !exists {
+			continue
+		}
+		existingHasSubsections := strings.Contains(es.Body, "\n### ") || strings.HasPrefix(es.Body, "### ")
+		proposedHasSubsections := strings.Contains(proposedBody, "\n### ") || strings.HasPrefix(proposedBody, "### ")
+		if existingHasSubsections && !proposedHasSubsections {
+			notes = append(notes, structuralNote{
+				section:      es.Name,
+				existingBody: es.Body,
+				templateBody: proposedBody,
+				observation:  "template uses simpler structure (flat bullets) — consider adopting the format while preserving project-specific rules",
+			})
+		}
+	}
+	return notes
+}
+
+func scoreRelPath(path string) string {
+	rel := filepath.Base(path)
+	if idx := strings.Index(path, "/docs/"); idx >= 0 {
+		rel = path[idx+1:]
+	} else if idx := strings.Index(path, "/cmd/"); idx >= 0 {
+		rel = path[idx+1:]
+	}
+	return rel
 }
 
 // readmeMissingWhySection returns true if the target directory contains a
 // README.md that does not have a ## Why section. Returns false if README.md
 // is absent (template will generate one with the section).
+// shouldSkipKnowledgeDir returns true if the target repo does not use
+// docs/knowledge/ or has only README.md there with no sibling files.
+func shouldSkipKnowledgeDir(targetDir string) bool {
+	knowledgeDir := filepath.Join(targetDir, "docs", "knowledge")
+	entries, err := os.ReadDir(knowledgeDir)
+	if err != nil {
+		// Directory doesn't exist — skip
+		return true
+	}
+	for _, entry := range entries {
+		if entry.Name() != "README.md" {
+			// Has real content beyond README.md (file or subdirectory) — keep
+			return false
+		}
+	}
+	// Only README.md or empty — skip
+	return true
+}
+
 func readmeMissingWhySection(targetDir string) bool {
 	content, err := os.ReadFile(filepath.Join(targetDir, "README.md"))
 	if err != nil {
