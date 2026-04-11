@@ -447,14 +447,26 @@ func runNewOrAdopt(tfs fs.FS, repoRoot string, cfg Config, adopt bool) error {
 
 	var ops []operation
 	if adopt {
-		transformed := applyAdoptTransforms(canonical)
+		transformed, scores := applyAdoptTransforms(canonical)
 		ops = compactOperations(transformed)
 		emitAdoptAdvisories(targetAbs)
 		ops = append(ops, manifestOp)
 		if err := applyOperations(ops, cfg.DryRun); err != nil {
 			return err
 		}
-		printAdoptDrift(transformed)
+		// Filter to only collision scores (keep/review) for the review doc
+		var collisions []collisionScore
+		for _, s := range scores {
+			if s.recommendation != "accept" {
+				collisions = append(collisions, s)
+			}
+		}
+		if len(collisions) > 0 {
+			if err := writeAdoptReview(targetAbs, collisions, cfg.DryRun); err != nil {
+				return err
+			}
+		}
+		printAdoptDriftFromScores(collisions)
 	} else {
 		ops = compactOperations(canonical)
 		ops = append(ops, manifestOp)
@@ -888,7 +900,8 @@ func planRender(tfs fs.FS, repoRoot string, cfg Config, targetRoot string, adopt
 	if !adopt {
 		return compactOperations(canonical), nil
 	}
-	return compactOperations(applyAdoptTransforms(canonical)), nil
+	transformed, _ := applyAdoptTransforms(canonical)
+	return compactOperations(transformed), nil
 }
 
 func planCanonical(tfs fs.FS, repoRoot string, cfg Config, targetRoot string) ([]operation, error) {
@@ -966,23 +979,36 @@ func planCanonical(tfs fs.FS, repoRoot string, cfg Config, targetRoot string) ([
 	return ops, nil
 }
 
-func applyAdoptTransforms(ops []operation) []operation {
+func applyAdoptTransforms(ops []operation) ([]operation, []collisionScore) {
 	out := make([]operation, len(ops))
+	var scores []collisionScore
 	for i, op := range ops {
 		switch {
 		case op.kind == "write" && op.note == "base governance contract":
-			out[i] = patchOrProposeGovernance(op)
+			score := scoreGovernanceCollision(op)
+			scores = append(scores, score)
+			if score.recommendation == "accept" {
+				out[i] = op // file doesn't exist, write directly
+			} else {
+				out[i] = operation{kind: "skip"} // collision handled via review doc
+			}
 		case op.kind == "write" && op.note == "template version marker":
 			out[i] = skipIfExists(op)
 		case op.kind == "symlink":
 			out[i] = skipIfExists(op)
 		case op.kind == "write" && op.note == "overlay file":
-			out[i] = proposeIfExists(op)
+			score := scoreOverlayCollision(op.path, op.content)
+			if score.recommendation == "accept" {
+				out[i] = op // file doesn't exist, write directly
+			} else {
+				scores = append(scores, score)
+				out[i] = operation{kind: "skip"} // collision handled via review doc
+			}
 		default:
 			out[i] = op
 		}
 	}
-	return out
+	return out, scores
 }
 
 func compactOperations(ops []operation) []operation {
@@ -1971,12 +1997,216 @@ func countEnhancementCandidates(candidates []EnhancementCandidate) map[string]in
 	return counts
 }
 
-func proposeIfExists(op operation) operation {
-	if _, err := os.Stat(op.path); err == nil {
-		op.path = proposalPath(op.path)
-		op.note = op.note + "; existing target preserved"
+type collisionScore struct {
+	path             string // target file path
+	recommendation   string // "keep", "review", "accept"
+	reason           string
+	existingLines    int
+	proposedLines    int
+	existingSections int
+	proposedSections int
+	missingSections  []string // sections in proposed but not in existing
+	proposedContent  string   // the template content for the review doc
+	governancePatch  string   // non-empty if this is an AGENTS.md patch with missing sections
+}
+
+func countLines(s string) int {
+	if s == "" {
+		return 0
 	}
-	return op
+	return strings.Count(s, "\n") + 1
+}
+
+func markdownSectionNames(content string) []string {
+	var names []string
+	for line := range strings.SplitSeq(content, "\n") {
+		if after, ok := strings.CutPrefix(line, "## "); ok {
+			names = append(names, strings.TrimSpace(after))
+		}
+	}
+	return names
+}
+
+func scoreOverlayCollision(existingPath string, proposedContent string) collisionScore {
+	score := collisionScore{
+		path:            existingPath,
+		proposedLines:   countLines(proposedContent),
+		proposedContent: proposedContent,
+	}
+
+	existingBytes, err := os.ReadFile(existingPath)
+	if err != nil {
+		// File doesn't exist — accept the proposed content
+		score.recommendation = "accept"
+		score.reason = "file does not exist in target"
+		return score
+	}
+	existingContent := string(existingBytes)
+	score.existingLines = countLines(existingContent)
+
+	isMarkdown := strings.HasSuffix(existingPath, ".md") || strings.HasSuffix(existingPath, ".md.tmpl")
+	if !isMarkdown {
+		// Non-markdown files always default to review
+		score.recommendation = "review"
+		score.reason = fmt.Sprintf("non-markdown file (existing %d lines, proposed %d lines)", score.existingLines, score.proposedLines)
+		return score
+	}
+
+	existingNames := markdownSectionNames(existingContent)
+	proposedNames := markdownSectionNames(proposedContent)
+	score.existingSections = len(existingNames)
+	score.proposedSections = len(proposedNames)
+
+	// Check for sections in proposed that are missing from existing
+	existingSet := make(map[string]bool, len(existingNames))
+	for _, name := range existingNames {
+		existingSet[name] = true
+	}
+	for _, name := range proposedNames {
+		if !existingSet[name] {
+			score.missingSections = append(score.missingSections, name)
+		}
+	}
+
+	// Decision rules
+	if score.existingLines >= 2*score.proposedLines {
+		score.recommendation = "keep"
+		score.reason = fmt.Sprintf("existing is more developed (%d lines vs %d proposed)", score.existingLines, score.proposedLines)
+		return score
+	}
+	if score.existingSections > score.proposedSections {
+		score.recommendation = "keep"
+		score.reason = fmt.Sprintf("existing has richer structure (%d sections vs %d proposed)", score.existingSections, score.proposedSections)
+		return score
+	}
+	if len(score.missingSections) > 0 {
+		score.recommendation = "review"
+		score.reason = fmt.Sprintf("proposed adds sections: %s", strings.Join(score.missingSections, ", "))
+		return score
+	}
+
+	score.recommendation = "review"
+	score.reason = fmt.Sprintf("similar content (%d lines vs %d proposed, %d sections vs %d)", score.existingLines, score.proposedLines, score.existingSections, score.proposedSections)
+	return score
+}
+
+func scoreGovernanceCollision(op operation) collisionScore {
+	existingContent, err := os.ReadFile(op.path)
+	if err != nil {
+		// File doesn't exist — accept (write directly)
+		return collisionScore{
+			path:           op.path,
+			recommendation: "accept",
+			reason:         "file does not exist in target",
+			proposedLines:  countLines(op.content),
+		}
+	}
+
+	patched, changed := patchGovernedSections(string(existingContent), op.content)
+	if !changed {
+		return collisionScore{
+			path:           op.path,
+			recommendation: "keep",
+			reason:         "all governed sections already present",
+			existingLines:  countLines(string(existingContent)),
+			proposedLines:  countLines(op.content),
+		}
+	}
+
+	// Find which sections are missing
+	existingSections := sectionMap(parseLevel2Sections(string(existingContent)))
+	var missing []string
+	for _, name := range governedSectionNames {
+		if _, exists := existingSections[name]; !exists {
+			missing = append(missing, name)
+		}
+	}
+
+	return collisionScore{
+		path:            op.path,
+		recommendation:  "review",
+		reason:          fmt.Sprintf("missing governed sections: %s", strings.Join(missing, ", ")),
+		existingLines:   countLines(string(existingContent)),
+		proposedLines:   countLines(op.content),
+		governancePatch: patched,
+		missingSections: missing,
+	}
+}
+
+func renderAdoptReview(scores []collisionScore, acNum int, useACTitle bool) string {
+	var b strings.Builder
+	if useACTitle {
+		fmt.Fprintf(&b, "# AC%d governa adopt review\n\n", acNum)
+	} else {
+		fmt.Fprintln(&b, "# governa adopt review")
+		fmt.Fprintln(&b, "")
+	}
+	fmt.Fprintf(&b, "Generated by `governa adopt`. Review each recommendation and take action.\n\n")
+
+	fmt.Fprintln(&b, "## Recommendations")
+	fmt.Fprintln(&b, "")
+	fmt.Fprintln(&b, "| File | Recommendation | Reason | Existing Lines | Proposed Lines |")
+	fmt.Fprintln(&b, "|------|----------------|--------|---------------|----------------|")
+	for _, s := range scores {
+		rel := filepath.Base(s.path)
+		// Try to get a more useful relative path
+		if idx := strings.Index(s.path, "/docs/"); idx >= 0 {
+			rel = s.path[idx+1:]
+		} else if idx := strings.Index(s.path, "/cmd/"); idx >= 0 {
+			rel = s.path[idx+1:]
+		}
+		fmt.Fprintf(&b, "| `%s` | %s | %s | %d | %d |\n", rel, s.recommendation, s.reason, s.existingLines, s.proposedLines)
+	}
+
+	// Action summary
+	keeps, reviews, accepts := 0, 0, 0
+	for _, s := range scores {
+		switch s.recommendation {
+		case "keep":
+			keeps++
+		case "review":
+			reviews++
+		case "accept":
+			accepts++
+		}
+	}
+	fmt.Fprintf(&b, "\n## Summary\n\n")
+	fmt.Fprintf(&b, "- **keep**: %d files (existing is more developed, no action needed)\n", keeps)
+	fmt.Fprintf(&b, "- **review**: %d files (proposed may add value, compare manually)\n", reviews)
+	fmt.Fprintf(&b, "- **accept**: %d files (new files written directly)\n", accepts)
+
+	if reviews > 0 {
+		fmt.Fprintf(&b, "\n## Review Actions\n\n")
+		fmt.Fprintln(&b, "For each `review` file, compare the proposed content below against your existing file and cherry-pick useful additions.")
+		fmt.Fprintln(&b, "")
+		for _, s := range scores {
+			if s.recommendation != "review" {
+				continue
+			}
+			rel := filepath.Base(s.path)
+			if idx := strings.Index(s.path, "/docs/"); idx >= 0 {
+				rel = s.path[idx+1:]
+			} else if idx := strings.Index(s.path, "/cmd/"); idx >= 0 {
+				rel = s.path[idx+1:]
+			}
+			if s.governancePatch != "" {
+				fmt.Fprintf(&b, "### `%s` (governance patch)\n\n", rel)
+				fmt.Fprintf(&b, "Missing governed sections: %s\n\n", strings.Join(s.missingSections, ", "))
+				fmt.Fprintf(&b, "Patched content that includes the missing sections:\n\n")
+				fmt.Fprintf(&b, "```markdown\n%s\n```\n\n", s.governancePatch)
+			} else {
+				fmt.Fprintf(&b, "### `%s`\n\n", rel)
+				if len(s.missingSections) > 0 {
+					fmt.Fprintf(&b, "Proposed adds sections: %s\n\n", strings.Join(s.missingSections, ", "))
+				}
+				fmt.Fprintf(&b, "Proposed content:\n\n")
+				fmt.Fprintf(&b, "```\n%s\n```\n\n", s.proposedContent)
+			}
+		}
+	}
+
+	fmt.Fprintf(&b, "\n## Status\n\n`PENDING`\n")
+	return b.String()
 }
 
 // readmeMissingWhySection returns true if the target directory contains a
@@ -1990,29 +2220,51 @@ func readmeMissingWhySection(targetDir string) bool {
 	return !strings.Contains(string(content), "## Why")
 }
 
-func printAdoptDrift(transformed []operation) {
-	govPatched := 0
-	overlayProposed := 0
-	for _, op := range transformed {
-		if op.kind != "write" {
-			continue
-		}
-		if strings.HasSuffix(op.path, "AGENTS.md") && strings.Contains(op.path, ".template-proposed") {
-			govPatched++
-		} else if strings.Contains(op.path, ".template-proposed") {
-			overlayProposed++
-		}
+func writeAdoptReview(targetDir string, scores []collisionScore, dryRun bool) error {
+	docsDir := filepath.Join(targetDir, "docs")
+	var reviewPath string
+	var acNum int
+	useACTitle := false
+	if info, err := os.Stat(docsDir); err == nil && info.IsDir() {
+		acNum, _ = nextACNumber(docsDir)
+		reviewPath = filepath.Join(docsDir, fmt.Sprintf("ac%d-governa-adopt.md", acNum))
+		useACTitle = true
+	} else {
+		acNum = 1
+		reviewPath = filepath.Join(targetDir, "governa-adopt-review.md")
 	}
-	if govPatched == 0 && overlayProposed == 0 {
+
+	content := renderAdoptReview(scores, acNum, useACTitle)
+	fmt.Printf("%s %s (adopt review document)\n", formatAction(dryRun, "write"), reviewPath)
+	if dryRun {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(reviewPath), 0o755); err != nil {
+		return fmt.Errorf("create directory for review doc: %w", err)
+	}
+	return os.WriteFile(reviewPath, []byte(content), 0o644)
+}
+
+func printAdoptDriftFromScores(scores []collisionScore) {
+	if len(scores) == 0 {
 		fmt.Printf("%s none detected\n", color.Yel("drift:"))
 		return
 	}
-	parts := []string{}
-	if govPatched > 0 {
-		parts = append(parts, "governance patch proposed")
+	keeps, reviews := 0, 0
+	for _, s := range scores {
+		switch s.recommendation {
+		case "keep":
+			keeps++
+		case "review":
+			reviews++
+		}
 	}
-	if overlayProposed > 0 {
-		parts = append(parts, fmt.Sprintf("%d overlay files proposed", overlayProposed))
+	parts := []string{}
+	if keeps > 0 {
+		parts = append(parts, fmt.Sprintf("%d files unchanged (existing more developed)", keeps))
+	}
+	if reviews > 0 {
+		parts = append(parts, fmt.Sprintf("%d files to review", reviews))
 	}
 	fmt.Printf("%s %s\n", color.Yel("drift:"), strings.Join(parts, ", "))
 }
@@ -2027,21 +2279,6 @@ func skipIfExists(op operation) operation {
 	if _, err := os.Stat(op.path); err == nil {
 		return operation{kind: "skip"}
 	}
-	return op
-}
-
-func patchOrProposeGovernance(op operation) operation {
-	existingContent, err := os.ReadFile(op.path)
-	if err != nil {
-		return op // file doesn't exist, write directly
-	}
-	patched, changed := patchGovernedSections(string(existingContent), op.content)
-	if !changed {
-		return operation{kind: "skip"}
-	}
-	op.content = patched
-	op.path = proposalPath(op.path)
-	op.note = op.note + "; patched with missing governed sections"
 	return op
 }
 

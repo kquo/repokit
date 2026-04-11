@@ -36,7 +36,7 @@ governa new -y DOC \
   -v "Clear, factual, concise"
 ```
 
-**`adopt`** — apply governance to an existing repo with conservative behavior: fit assessment, proposal files instead of overwrites, and section-level `AGENTS.md` patching that adds only missing governed sections.
+**`adopt`** — apply governance to an existing repo with conservative behavior: fit assessment, content-aware collision scoring, and a single consolidated review document instead of scattered proposal files. New files are written directly; collisions are scored as `keep`, `review`, or `accept` and reported in a review doc.
 
 ```bash
 governa adopt -d

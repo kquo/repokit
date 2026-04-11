@@ -10,6 +10,7 @@ Implementation-focused agent behavior. Follow these rules alongside `AGENTS.md`.
 - Follow the documented pre-release checklist exactly and in order.
 - Never run the release command; present it for the user to run.
 - Propagate fixes to overlay templates and rendered examples in the same change.
+- When work needs an AC, create or update the AC file in `docs/` before asking for review; do not use a chat-only AC draft as the source of truth.
 - When an AC document exists for the current work, follow its scope and update its status when complete.
 - When an AC is completed and its decisions are consolidated into durable docs or code, remove the AC file in the same change.
 

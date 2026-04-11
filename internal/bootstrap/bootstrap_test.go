@@ -1093,30 +1093,61 @@ func TestCompactOperations(t *testing.T) {
 	}
 }
 
-// --- proposeIfExists / skipIfExists tests ---
+// --- scoreOverlayCollision tests ---
 
-func TestProposeIfExistsFileExists(t *testing.T) {
+func TestScoreOverlayCollisionKeepLargerExisting(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	existing := filepath.Join(dir, "README.md")
-	mustWrite(t, existing, "content")
-
-	op := operation{kind: "write", path: existing, note: "overlay file"}
-	result := proposeIfExists(op)
-	if result.path != filepath.Join(dir, "README.template-proposed.md") {
-		t.Fatalf("got path %q, expected proposal path", result.path)
-	}
-	if !strings.Contains(result.note, "existing target preserved") {
-		t.Fatal("expected note to mention existing target preserved")
+	// 20 lines existing vs 5 lines proposed
+	mustWrite(t, existing, strings.Repeat("line\n", 20))
+	score := scoreOverlayCollision(existing, strings.Repeat("line\n", 5))
+	if score.recommendation != "keep" {
+		t.Fatalf("recommendation = %q, want keep", score.recommendation)
 	}
 }
 
-func TestProposeIfExistsFileDoesNotExist(t *testing.T) {
+func TestScoreOverlayCollisionKeepMoreSections(t *testing.T) {
 	t.Parallel()
-	op := operation{kind: "write", path: "/nonexistent/README.md", note: "overlay file"}
-	result := proposeIfExists(op)
-	if result.path != "/nonexistent/README.md" {
-		t.Fatalf("path should be unchanged, got %q", result.path)
+	dir := t.TempDir()
+	existing := filepath.Join(dir, "doc.md")
+	mustWrite(t, existing, "# Doc\n\n## A\ncontent\n## B\ncontent\n## C\ncontent\n## D\ncontent\n")
+	score := scoreOverlayCollision(existing, "# Doc\n\n## A\ncontent\n## B\ncontent\n")
+	if score.recommendation != "keep" {
+		t.Fatalf("recommendation = %q, want keep", score.recommendation)
+	}
+}
+
+func TestScoreOverlayCollisionReviewNewSections(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	existing := filepath.Join(dir, "doc.md")
+	mustWrite(t, existing, "# Doc\n\n## A\ncontent\n")
+	score := scoreOverlayCollision(existing, "# Doc\n\n## A\ncontent\n## B\nnew content\n")
+	if score.recommendation != "review" {
+		t.Fatalf("recommendation = %q, want review", score.recommendation)
+	}
+	if len(score.missingSections) == 0 || score.missingSections[0] != "B" {
+		t.Fatalf("missingSections = %v, want [B]", score.missingSections)
+	}
+}
+
+func TestScoreOverlayCollisionAcceptMissing(t *testing.T) {
+	t.Parallel()
+	score := scoreOverlayCollision("/nonexistent/file.md", "content\n")
+	if score.recommendation != "accept" {
+		t.Fatalf("recommendation = %q, want accept", score.recommendation)
+	}
+}
+
+func TestScoreOverlayCollisionReviewNonMarkdown(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	existing := filepath.Join(dir, "build.sh")
+	mustWrite(t, existing, "#!/bin/bash\necho hello\n")
+	score := scoreOverlayCollision(existing, "#!/bin/bash\necho world\n")
+	if score.recommendation != "review" {
+		t.Fatalf("recommendation = %q, want review for non-markdown", score.recommendation)
 	}
 }
 
@@ -1286,7 +1317,7 @@ func TestPlanRenderCodeOverlay(t *testing.T) {
 	}
 }
 
-func TestPlanRenderAdoptProposesExistingFiles(t *testing.T) {
+func TestPlanRenderAdoptSkipsExistingGovernance(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -1312,12 +1343,10 @@ func TestPlanRenderAdoptProposesExistingFiles(t *testing.T) {
 		t.Fatalf("planRender() error = %v", err)
 	}
 
-	// AGENTS.md should be proposed, not overwritten
+	// Existing AGENTS.md should be skipped (collision handled via review doc)
 	for _, op := range ops {
 		if strings.Contains(op.path, "AGENTS") && op.kind == "write" {
-			if !strings.Contains(op.path, "template-proposed") {
-				t.Fatalf("existing AGENTS.md should get proposal path, got %q", op.path)
-			}
+			t.Fatalf("existing AGENTS.md should be skipped, got write to %q", op.path)
 		}
 	}
 }
@@ -2552,17 +2581,22 @@ func TestAdoptPatchesMissingSections(t *testing.T) {
 		t.Fatal("original AGENTS.md should be preserved")
 	}
 
-	// Proposal should exist with patched content
-	proposal := proposalPath(filepath.Join(targetDir, "AGENTS.md"))
-	content, err := os.ReadFile(proposal)
-	if err != nil {
-		t.Fatalf("expected patched proposal at %s, got error: %v", proposal, err)
+	// No .template-proposed file should exist
+	if _, err := os.Stat(filepath.Join(targetDir, "AGENTS.template-proposed.md")); err == nil {
+		t.Fatal("should not create .template-proposed file")
 	}
-	if !strings.Contains(string(content), "Existing purpose.") {
-		t.Fatal("proposal should preserve existing Purpose")
+
+	// Review doc should exist with governance patch info
+	reviewDoc := findAdoptReviewDoc(t, filepath.Join(targetDir, "docs"))
+	if reviewDoc == "" {
+		t.Fatal("expected adopt review doc in docs/")
 	}
-	if !strings.Contains(string(content), "## Interaction Mode") {
-		t.Fatal("proposal should include missing governed sections")
+	content, _ := os.ReadFile(reviewDoc)
+	if !strings.Contains(string(content), "AGENTS.md") {
+		t.Fatal("review doc should reference AGENTS.md")
+	}
+	if !strings.Contains(string(content), "review") {
+		t.Fatal("review doc should recommend review for AGENTS.md with missing sections")
 	}
 }
 
@@ -2588,10 +2622,9 @@ func TestAdoptSkipsWhenAllSectionsPresent(t *testing.T) {
 		t.Fatalf("runNewOrAdopt() error = %v", err)
 	}
 
-	// No proposal should be created
-	proposal := proposalPath(filepath.Join(targetDir, "AGENTS.md"))
-	if _, err := os.Stat(proposal); err == nil {
-		t.Fatal("should not create proposal when all governed sections present")
+	// No .template-proposed should exist
+	if _, err := os.Stat(filepath.Join(targetDir, "AGENTS.template-proposed.md")); err == nil {
+		t.Fatal("should not create .template-proposed file when all governed sections present")
 	}
 }
 
@@ -2622,9 +2655,8 @@ func TestAdoptNoExistingAgentsWritesDirectly(t *testing.T) {
 		t.Fatal("directly written AGENTS.md should have full template content")
 	}
 
-	proposal := proposalPath(filepath.Join(targetDir, "AGENTS.md"))
-	if _, err := os.Stat(proposal); err == nil {
-		t.Fatal("should not create proposal when no existing AGENTS.md")
+	if _, err := os.Stat(filepath.Join(targetDir, "AGENTS.template-proposed.md")); err == nil {
+		t.Fatal("should not create .template-proposed when no existing AGENTS.md")
 	}
 }
 
@@ -2711,17 +2743,23 @@ func TestBootstrapAdoptProposesAgentRoles(t *testing.T) {
 		t.Fatal("adopt should preserve existing dev.md")
 	}
 
-	// Proposals should exist for all four files
+	// No .template-proposed files should exist
 	for _, rel := range []string{
 		filepath.Join("docs", "agent-roles", "README.md"),
 		filepath.Join("docs", "agent-roles", "dev.md"),
 		filepath.Join("docs", "agent-roles", "qa.md"),
 		filepath.Join("docs", "agent-roles", "maintainer.md"),
 	} {
-		proposal := proposalPath(filepath.Join(targetDir, rel))
-		if _, err := os.Stat(proposal); err != nil {
-			t.Fatalf("expected proposal for %s at %s, got error: %v", rel, proposal, err)
+		proposed := filepath.Join(targetDir, strings.TrimSuffix(rel, ".md")+".template-proposed.md")
+		if _, err := os.Stat(proposed); err == nil {
+			t.Fatalf("should not create .template-proposed for %s", rel)
 		}
+	}
+
+	// Review doc should exist with collision entries
+	reviewDoc := findAdoptReviewDoc(t, filepath.Join(targetDir, "docs"))
+	if reviewDoc == "" {
+		t.Fatal("expected adopt review doc")
 	}
 }
 
@@ -2798,23 +2836,19 @@ func TestBootstrapAdoptProposesEnrichedDocs(t *testing.T) {
 		t.Fatal("adopt should preserve existing ac-example.md")
 	}
 
-	// Proposals should exist
-	exampleProposal := proposalPath(filepath.Join(targetDir, "docs", "ac-example.md"))
-	if _, err := os.Stat(exampleProposal); err != nil {
-		t.Fatalf("expected ac-example.md proposal, got error: %v", err)
-	}
-	brProposal := proposalPath(filepath.Join(targetDir, "docs", "build-release.md"))
-	if _, err := os.Stat(brProposal); err != nil {
-		t.Fatalf("expected build-release.md proposal, got error: %v", err)
+	// No .template-proposed files
+	if _, err := os.Stat(filepath.Join(targetDir, "docs", "ac-example.template-proposed.md")); err == nil {
+		t.Fatal("should not create .template-proposed for ac-example.md")
 	}
 
-	// Proposed build-release.md should contain both new sections
-	brContent, _ := os.ReadFile(brProposal)
-	if !strings.Contains(string(brContent), "## Template Upgrade") {
-		t.Fatal("proposed build-release.md should contain Template Upgrade section")
+	// Review doc should exist with collision entries
+	reviewDoc := findAdoptReviewDoc(t, filepath.Join(targetDir, "docs"))
+	if reviewDoc == "" {
+		t.Fatal("expected adopt review doc")
 	}
-	if !strings.Contains(string(brContent), "## Release Artifacts") {
-		t.Fatal("proposed build-release.md should contain Release Artifacts section")
+	content, _ := os.ReadFile(reviewDoc)
+	if !strings.Contains(string(content), "ac-example.md") || !strings.Contains(string(content), "build-release.md") {
+		t.Fatal("review doc should reference colliding files")
 	}
 }
 
@@ -2898,23 +2932,45 @@ func TestBootstrapAdoptDocProposesEnrichedFiles(t *testing.T) {
 		t.Fatalf("runNewOrAdopt() error = %v", err)
 	}
 
+	// No .template-proposed files should exist
 	for _, rel := range []string{
 		"voice.md",
 		"calendar.md",
 		"publishing-workflow.md",
 		filepath.Join("docs", "agent-roles", "dev.md"),
 	} {
-		proposal := proposalPath(filepath.Join(targetDir, rel))
-		if _, err := os.Stat(proposal); err != nil {
-			t.Fatalf("expected proposal for %s, got error: %v", rel, err)
+		ext := filepath.Ext(rel)
+		name := strings.TrimSuffix(rel, ext)
+		proposed := filepath.Join(targetDir, name+".template-proposed"+ext)
+		if _, err := os.Stat(proposed); err == nil {
+			t.Fatalf("should not create .template-proposed for %s", rel)
 		}
 	}
 
-	// Proposed publishing-workflow should contain platform notes
-	pwProposal, _ := os.ReadFile(proposalPath(filepath.Join(targetDir, "publishing-workflow.md")))
-	if !strings.Contains(string(pwProposal), "Platform-Specific Notes") {
-		t.Fatal("proposed publishing-workflow.md should contain Platform-Specific Notes")
+	// Review doc should exist (DOC repos without docs/ get root file)
+	reviewDoc := findAdoptReviewDoc(t, filepath.Join(targetDir, "docs"))
+	if reviewDoc == "" {
+		// Try root-level fallback
+		rootReview := filepath.Join(targetDir, "governa-adopt-review.md")
+		if _, err := os.Stat(rootReview); err != nil {
+			t.Fatal("expected adopt review doc")
+		}
 	}
+}
+
+func findAdoptReviewDoc(t *testing.T, docsDir string) string {
+	t.Helper()
+	entries, err := os.ReadDir(docsDir)
+	if err != nil {
+		return ""
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, "ac") && strings.Contains(name, "governa-adopt") && strings.HasSuffix(name, ".md") {
+			return filepath.Join(docsDir, name)
+		}
+	}
+	return ""
 }
 
 func mustWrite(t *testing.T, path, content string) {

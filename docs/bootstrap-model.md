@@ -61,17 +61,17 @@ Use when the target already contains an existing project.
 Behavior:
 
 - inspect current files before writing anything
-- require the same metadata inputs as `new`
+- infer metadata (repo name, purpose, type, stack) from the target directory; explicit flags override; on re-adopt, stored manifest params are reused
 - create missing governed files from the template
-- patch only clearly owned sections in existing governed files
+- score existing file collisions using content-aware comparison and report in a consolidated review document
 - avoid broad rewrites of user-authored docs unless explicitly approved
 - write `TEMPLATE_VERSION`
 - create `CLAUDE.md -> AGENTS.md` if missing
 
 `adopt` must be conservative by default.
-It should prefer adding missing files or appending clearly labeled sections over replacing existing docs wholesale.
+It writes new files directly and reports collisions in a single review document with per-file recommendations.
 
-For `AGENTS.md` specifically, adopt performs section-level patching: it parses the existing file and the template into `##` sections, identifies which governed sections are missing, and appends only those sections in the template's governed-section order. Existing content (governed or not) is never modified. If all governed sections are already present, no proposal is created. If sections are missing, the patched result is written as a `.template-proposed` file for review.
+For `AGENTS.md` specifically, adopt checks which governed sections are present. If all governed sections exist, the file scores as `keep`. If sections are missing, the governance patch (with missing sections appended) is included in the review document for the operator to apply manually. Existing content is never modified automatically.
 
 Before writing files, `adopt` should also assess how well the template fits the target repo and report that result to the user.
 
@@ -214,10 +214,10 @@ Adoption mode should avoid clobbering an existing repo.
 Rules:
 
 - never overwrite an existing file silently
-- if a target file already exists, either:
-  - patch a named owned section, or
-  - write a sibling `*.template-proposed.md` file, or
-  - stop and ask for approval
+- if a target file already exists, score the collision using content-aware comparison (line count ratio, section count, missing sections) and classify as `keep` (existing is more developed), `review` (proposed may add value), or `accept` (file is new)
+- report all collisions in a single consolidated review document (`docs/acN-governa-adopt.md` if `docs/` exists, `governa-adopt-review.md` at repo root otherwise) — no `.template-proposed` files are written
+- for markdown files: existing ≥2x lines → `keep`; existing has more sections → `keep`; proposed adds missing sections → `review`
+- for non-markdown files: existing collisions default to `review` for operator judgment
 - never rewrite an existing `AGENTS.md` wholesale unless the user explicitly requests replacement
 - preserve unrelated local changes
 
