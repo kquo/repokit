@@ -88,8 +88,7 @@ func TestWrapEmptyString(t *testing.T) {
 // 256-color escape format. This test calls wrap() directly so results are
 // deterministic regardless of TTY state.
 func TestWrapProduces256ColorEscapes(t *testing.T) {
-	t.Parallel()
-
+	// Not parallel: mutates package-level enabled.
 	origEnabled := enabled
 	enabled = true
 	defer func() { enabled = origEnabled }()
@@ -105,9 +104,7 @@ func TestWrapProduces256ColorEscapes(t *testing.T) {
 // documented 256-color escape code. A regression to basic ANSI (e.g. "32"
 // instead of "38;5;2") would fail this test.
 func TestColorFunctions256Codes(t *testing.T) {
-	t.Parallel()
-
-	// Force-enable so we get escape sequences regardless of TTY.
+	// Not parallel: mutates package-level enabled.
 	origEnabled := enabled
 	enabled = true
 	defer func() { enabled = origEnabled }()
@@ -147,9 +144,7 @@ func TestColorFunctions256Codes(t *testing.T) {
 // TestShowPaletteCoversAllFunctions captures ShowPalette output and verifies
 // all 13 color function labels are present.
 func TestShowPaletteCoversAllFunctions(t *testing.T) {
-	t.Parallel()
-
-	// Capture stdout.
+	// Not parallel: mutates os.Stdout.
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
