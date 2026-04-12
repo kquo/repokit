@@ -37,5 +37,5 @@ If the grep turns up no other matches, the fix is contained. If it does, propaga
 |--------|--------------|--------------|
 | `internal/buildtool/` | `internal/templates/overlays/code/files/cmd/build/main.go.tmpl` | `examples/code/cmd/build/main.go` |
 | `internal/reltool/` | `internal/templates/overlays/code/files/cmd/rel/main.go.tmpl`, `internal/templates/overlays/doc/files/cmd/rel/main.go.tmpl` | `examples/code/cmd/rel/main.go`, `examples/doc/cmd/rel/main.go` |
-| `internal/color/` | `internal/templates/overlays/code/files/cmd/build/color.go.tmpl`, `internal/templates/overlays/code/files/cmd/rel/color.go.tmpl` | `examples/code/cmd/build/color.go`, `examples/code/cmd/rel/color.go` |
+| `internal/color/` | `internal/templates/overlays/code/files/internal/color/color.go.tmpl`, `internal/templates/overlays/doc/files/internal/color/color.go.tmpl` | `examples/code/internal/color/color.go`, `examples/doc/internal/color/color.go` |
 | `build.sh` | `internal/templates/overlays/code/files/build.sh.tmpl` | `examples/code/build.sh` |

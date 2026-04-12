@@ -18,5 +18,5 @@ Current contents:
 - `docs/agent-roles/qa.md`
 - `docs/agent-roles/maintainer.md`
 - `cmd/rel/main.go`
-- `cmd/rel/color.go`
+- `internal/color/color.go` shared color package
 - `rel.sh`

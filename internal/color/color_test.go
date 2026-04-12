@@ -10,10 +10,12 @@ import (
 // In test environments stdout is not a TTY, so enabled == false and all
 // color functions return the input string unchanged. The tests below verify
 // both the no-color path (input preserved) and the wrap helper directly.
+//
+// No test in this file uses t.Parallel() because several tests mutate the
+// package-level enabled and color256 variables. Running any test concurrently
+// with those mutations would be a data race.
 
 func TestColorFunctionsContainInput(t *testing.T) {
-	t.Parallel()
-
 	cases := []struct {
 		name string
 		fn   func(any) string
@@ -44,8 +46,6 @@ func TestColorFunctionsContainInput(t *testing.T) {
 }
 
 func TestColorFunctionsNoTTY(t *testing.T) {
-	t.Parallel()
-
 	// In test environment, enabled is false (stdout is not a char device).
 	// Functions must return the bare input string.
 	if enabled {
@@ -78,8 +78,6 @@ func TestColorFunctionsNoTTY(t *testing.T) {
 }
 
 func TestWrapEmptyString(t *testing.T) {
-	t.Parallel()
-
 	// wrap with an empty input should not panic regardless of TTY state.
 	_ = wrap("32", "")
 }
@@ -88,7 +86,6 @@ func TestWrapEmptyString(t *testing.T) {
 // 256-color escape format. This test calls wrap() directly so results are
 // deterministic regardless of TTY state.
 func TestWrapProduces256ColorEscapes(t *testing.T) {
-	// Not parallel: mutates package-level enabled.
 	origEnabled := enabled
 	enabled = true
 	defer func() { enabled = origEnabled }()
@@ -101,13 +98,13 @@ func TestWrapProduces256ColorEscapes(t *testing.T) {
 }
 
 // TestColorFunctions256Codes verifies every color function uses the
-// documented 256-color escape code. A regression to basic ANSI (e.g. "32"
-// instead of "38;5;2") would fail this test.
+// documented 256-color escape code when color256 is true.
 func TestColorFunctions256Codes(t *testing.T) {
-	// Not parallel: mutates package-level enabled.
 	origEnabled := enabled
+	orig256 := color256
 	enabled = true
-	defer func() { enabled = origEnabled }()
+	color256 = true
+	defer func() { enabled = origEnabled; color256 = orig256 }()
 
 	cases := []struct {
 		name string
@@ -141,10 +138,50 @@ func TestColorFunctions256Codes(t *testing.T) {
 	}
 }
 
+// TestColorFunctionsBasicCodes verifies every color function falls back to
+// basic ANSI codes when color256 is false.
+func TestColorFunctionsBasicCodes(t *testing.T) {
+	origEnabled := enabled
+	orig256 := color256
+	enabled = true
+	color256 = false
+	defer func() { enabled = origEnabled; color256 = orig256 }()
+
+	cases := []struct {
+		name string
+		fn   func(any) string
+		code string
+	}{
+		{"Gra", Gra, "90"},
+		{"Grn", Grn, "32"},
+		{"GrnR", GrnR, "7;32"},
+		{"GrnD", GrnD, "32"},
+		{"Yel", Yel, "33"},
+		{"Blu", Blu, "94"},
+		{"Cya", Cya, "36"},
+		{"Red", Red, "91"},
+		{"RedR", RedR, "97;41"},
+		{"RedD", RedD, "31"},
+		{"Whi", Whi, "37"},
+		{"Whi2", Whi2, "97"},
+		{"BoldW", BoldW, "1;97"},
+	}
+	for _, tc := range cases {
+		got := tc.fn("x")
+		wantPrefix := "\033[" + tc.code + "m"
+		if !strings.HasPrefix(got, wantPrefix) {
+			t.Errorf("%s: got %q, want prefix %q", tc.name, got, wantPrefix)
+		}
+		wantSuffix := "\033[0m"
+		if !strings.HasSuffix(got, wantSuffix) {
+			t.Errorf("%s: got %q, want suffix %q", tc.name, got, wantSuffix)
+		}
+	}
+}
+
 // TestShowPaletteCoversAllFunctions captures ShowPalette output and verifies
 // all 13 color function labels are present.
 func TestShowPaletteCoversAllFunctions(t *testing.T) {
-	// Not parallel: mutates os.Stdout.
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
@@ -165,4 +202,55 @@ func TestShowPaletteCoversAllFunctions(t *testing.T) {
 			t.Errorf("ShowPalette() output missing label %q", label)
 		}
 	}
+}
+
+// TestFormatUsage exercises heading, flag alignment, type-suffix rendering,
+// long-flag overflow, and footer newline handling.
+func TestFormatUsage(t *testing.T) {
+	// Tests run with enabled=false, so color wrappers return plain text.
+
+	t.Run("basic", func(t *testing.T) {
+		got := FormatUsage("prog [flags]", []UsageLine{
+			{"-v", "verbose output"},
+			{"-o string", "output file"},
+		}, "")
+		if !strings.HasPrefix(got, "Usage: prog [flags]\n") {
+			t.Errorf("heading mismatch: %q", got)
+		}
+		if !strings.Contains(got, "-v") || !strings.Contains(got, "verbose output") {
+			t.Errorf("missing flag line: %q", got)
+		}
+		if !strings.Contains(got, "-o string") || !strings.Contains(got, "output file") {
+			t.Errorf("missing type-suffix flag line: %q", got)
+		}
+		// No footer => no trailing blank line.
+		if strings.HasSuffix(got, "\n\n") {
+			t.Errorf("unexpected trailing blank line with empty footer: %q", got)
+		}
+	})
+
+	t.Run("footer_no_newline", func(t *testing.T) {
+		got := FormatUsage("prog", nil, "See docs.")
+		if !strings.Contains(got, "\nSee docs.\n") {
+			t.Errorf("footer missing or not newline-terminated: %q", got)
+		}
+	})
+
+	t.Run("footer_with_newline", func(t *testing.T) {
+		got := FormatUsage("prog", nil, "See docs.\n")
+		// Should not double the trailing newline.
+		if strings.HasSuffix(got, "docs.\n\n") {
+			t.Errorf("footer double-newlined: %q", got)
+		}
+	})
+
+	t.Run("long_flag", func(t *testing.T) {
+		got := FormatUsage("prog", []UsageLine{
+			{"--very-long-flag-name-that-exceeds-column string", "desc"},
+		}, "")
+		// Long flags get 2-space gap instead of padding to column 38.
+		if !strings.Contains(got, "string  desc") {
+			t.Errorf("long flag alignment wrong: %q", got)
+		}
+	})
 }

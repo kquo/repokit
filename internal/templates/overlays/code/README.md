@@ -11,7 +11,8 @@ Current contents:
 - `plan.md`
 - `build.sh` for Go-based repos only
 - `cmd/build/main.go` for Go-based repos only
-- `cmd/build/color.go` for Go-based repos only
+- `cmd/rel/main.go` for Go-based repos only
+- `internal/color/color.go` shared color package
 - `docs/README.md`
 - `docs/development-cycle.md`
 - `docs/ac-template.md`
@@ -22,7 +23,5 @@ Current contents:
 - `docs/agent-roles/dev.md`
 - `docs/agent-roles/qa.md`
 - `docs/agent-roles/maintainer.md`
-- `cmd/rel/main.go` for Go-based repos only
-- `cmd/rel/color.go` for Go-based repos only
 
 See `plan.md` for future overlay improvements.

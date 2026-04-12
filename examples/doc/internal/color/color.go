@@ -1,15 +1,9 @@
-// Package color provides ANSI 256-color terminal helpers for CLI output.
-// All colors use the 256-color escape format (38;5;N for foreground,
-// 48;5;N for background). Colors are suppressed when stdout is not a
-// terminal (piped output) or when the NO_COLOR environment variable is
-// set (https://no-color.org).
-//
-// Palette reference (256-color index):
-//
-//	0–7    standard colors (black, red, green, yellow, blue, magenta, cyan, white)
-//	8–15   bright variants of 0–7
-//	16–231 6×6×6 color cube
-//	232–255 grayscale ramp
+// Package color provides ANSI terminal color helpers for CLI output.
+// When the terminal advertises 256-color support (via COLORTERM or TERM
+// containing "256color"), functions emit 256-color SGR sequences (38;5;N).
+// Otherwise they fall back to basic ANSI codes (30–97) that render
+// correctly on any color-capable terminal. Colors are suppressed entirely
+// when stdout is not a terminal or NO_COLOR is set (https://no-color.org).
 package color
 
 import (
@@ -33,6 +27,15 @@ var enabled = func() bool {
 	return fi.Mode()&os.ModeCharDevice != 0
 }()
 
+// color256 is true when the terminal advertises 256-color support.
+var color256 = func() bool {
+	ct := os.Getenv("COLORTERM")
+	if ct == "truecolor" || ct == "24bit" {
+		return true
+	}
+	return strings.Contains(os.Getenv("TERM"), "256color")
+}()
+
 func wrap(code string, v any) string {
 	s := fmt.Sprint(v)
 	if !enabled {
@@ -41,72 +44,90 @@ func wrap(code string, v any) string {
 	return "\033[" + code + "m" + s + "\033[0m"
 }
 
-// Gra renders v in gray (246).
-func Gra(v any) string { return wrap("38;5;246", v) }
+// pick returns c256 when the terminal supports 256 colors, cBasic otherwise.
+func pick(c256, cBasic string) string {
+	if color256 {
+		return c256
+	}
+	return cBasic
+}
 
-// Grn renders v in green (2).
-func Grn(v any) string { return wrap("38;5;2", v) }
+// Gra renders v in gray.
+func Gra(v any) string { return wrap(pick("38;5;246", "90"), v) }
+
+// Grn renders v in green.
+func Grn(v any) string { return wrap(pick("38;5;2", "32"), v) }
 
 // GrnR renders v in reverse video green (green background, dark text).
-func GrnR(v any) string { return wrap("7;38;5;2", v) }
+func GrnR(v any) string { return wrap(pick("7;38;5;2", "7;32"), v) }
 
-// GrnD renders v in dark green (28).
-func GrnD(v any) string { return wrap("38;5;28", v) }
+// GrnD renders v in dark green.
+func GrnD(v any) string { return wrap(pick("38;5;28", "32"), v) }
 
-// Yel renders v in yellow (3).
-func Yel(v any) string { return wrap("38;5;3", v) }
+// Yel renders v in yellow.
+func Yel(v any) string { return wrap(pick("38;5;3", "33"), v) }
 
-// Blu renders v in bright blue (12).
-func Blu(v any) string { return wrap("38;5;12", v) }
+// Blu renders v in bright blue.
+func Blu(v any) string { return wrap(pick("38;5;12", "94"), v) }
 
-// Cya renders v in cyan (6).
-func Cya(v any) string { return wrap("38;5;6", v) }
+// Cya renders v in cyan.
+func Cya(v any) string { return wrap(pick("38;5;6", "36"), v) }
 
-// Red renders v in bright red (9).
-func Red(v any) string { return wrap("38;5;9", v) }
+// Red renders v in bright red.
+func Red(v any) string { return wrap(pick("38;5;9", "91"), v) }
 
-// RedR renders v in white text on red background (15 on 1).
-func RedR(v any) string { return wrap("38;5;15;48;5;1", v) }
+// RedR renders v in white text on red background.
+func RedR(v any) string { return wrap(pick("38;5;15;48;5;1", "97;41"), v) }
 
-// RedD renders v in dark red (124).
-func RedD(v any) string { return wrap("38;5;124", v) }
+// RedD renders v in dark red.
+func RedD(v any) string { return wrap(pick("38;5;124", "31"), v) }
 
-// Whi renders v in white (7).
-func Whi(v any) string { return wrap("38;5;7", v) }
+// Whi renders v in white.
+func Whi(v any) string { return wrap(pick("38;5;7", "37"), v) }
 
-// Whi2 renders v in bright white (15).
-func Whi2(v any) string { return wrap("38;5;15", v) }
+// Whi2 renders v in bright white.
+func Whi2(v any) string { return wrap(pick("38;5;15", "97"), v) }
 
-// BoldW renders v in bold bright white (15).
-func BoldW(v any) string { return wrap("1;38;5;15", v) }
+// BoldW renders v in bold bright white.
+func BoldW(v any) string { return wrap(pick("1;38;5;15", "1;97"), v) }
 
 // ShowPalette prints a labeled swatch of every color function to stdout.
 // Useful for verifying terminal rendering and choosing colors.
 func ShowPalette() {
 	sample := "The quick brown fox"
-	entries := []struct {
+	type entry struct {
 		name string
 		fn   func(any) string
-		code string
-	}{
-		{"Gra ", Gra, "38;5;246"},
-		{"Grn ", Grn, "38;5;2"},
-		{"GrnR", GrnR, "7;38;5;2"},
-		{"GrnD", GrnD, "38;5;28"},
-		{"Yel ", Yel, "38;5;3"},
-		{"Blu ", Blu, "38;5;12"},
-		{"Cya ", Cya, "38;5;6"},
-		{"Red ", Red, "38;5;9"},
-		{"RedR", RedR, "38;5;15;48;5;1"},
-		{"RedD", RedD, "38;5;124"},
-		{"Whi ", Whi, "38;5;7"},
-		{"Whi2", Whi2, "38;5;15"},
-		{"BoldW", BoldW, "1;38;5;15"},
+		c256 string
+		cB   string
 	}
-	fmt.Println(BoldW("Color palette (256-color ANSI)"))
+	entries := []entry{
+		{"Gra ", Gra, "38;5;246", "90"},
+		{"Grn ", Grn, "38;5;2", "32"},
+		{"GrnR", GrnR, "7;38;5;2", "7;32"},
+		{"GrnD", GrnD, "38;5;28", "32"},
+		{"Yel ", Yel, "38;5;3", "33"},
+		{"Blu ", Blu, "38;5;12", "94"},
+		{"Cya ", Cya, "38;5;6", "36"},
+		{"Red ", Red, "38;5;9", "91"},
+		{"RedR", RedR, "38;5;15;48;5;1", "97;41"},
+		{"RedD", RedD, "38;5;124", "31"},
+		{"Whi ", Whi, "38;5;7", "37"},
+		{"Whi2", Whi2, "38;5;15", "97"},
+		{"BoldW", BoldW, "1;38;5;15", "1;97"},
+	}
+	mode := "basic ANSI"
+	if color256 {
+		mode = "256-color"
+	}
+	fmt.Printf("%s (%s)\n", BoldW("Color palette"), mode)
 	fmt.Println()
 	for _, e := range entries {
-		fmt.Printf("  %-6s %-20s  %s\n", e.name, e.fn(sample), Gra(e.code))
+		code := e.cB
+		if color256 {
+			code = e.c256
+		}
+		fmt.Printf("  %-6s %-20s  %s\n", e.name, e.fn(sample), Gra(code))
 	}
 	fmt.Println()
 }
